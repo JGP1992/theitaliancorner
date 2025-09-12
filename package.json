@@ -4,24 +4,48 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:push": "prisma db push",
+    "db:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
+    "backup": "node scripts/backup-restore.js backup",
+    "backup:list": "node scripts/backup-restore.js list",
+    "backup:restore": "node scripts/backup-restore.js restore",
+    "backup:cleanup": "node scripts/backup-restore.js cleanup",
+    "backup:export-sql": "node scripts/backup-restore.js export-sql",
+    "backup:daily": "node scripts/backup-scheduler.js daily",
+    "backup:weekly": "node scripts/backup-scheduler.js weekly",
+    "backup:monthly": "node scripts/backup-scheduler.js monthly",
+    "backup:auto": "node scripts/backup-scheduler.js auto",
+    "backup:health": "node scripts/backup-scheduler.js health",
+    "validate:data": "node scripts/data-validator.js check",
+    "validate:backup": "node scripts/data-validator.js backup",
+    "validate:report": "node scripts/data-validator.js report"
   },
   "dependencies": {
+    "@prisma/client": "^6.16.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "bcryptjs": "^3.0.2",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.544.0",
+    "next": "15.5.3",
     "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "next": "15.5.3"
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "autoprefixer": "^10.4.21",
     "eslint": "^9",
     "eslint-config-next": "15.5.3",
-    "@eslint/eslintrc": "^3"
+    "postcss": "^8.5.6",
+    "prisma": "^6.16.0",
+    "tailwindcss": "^3.4.17",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
   }
 }

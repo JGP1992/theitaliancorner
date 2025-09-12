@@ -1,0 +1,334 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// prisma seed uses package.json scripts; no inline config here
+
+/// Core entities for the stocktake system.
+model Store {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  apiKey    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stocktakes    Stocktake[]
+  deliveryPlans DeliveryPlan[]
+  inventory     StoreInventory[]
+}
+
+model StoreInventory {
+  id          String   @id @default(cuid())
+  store       Store    @relation(fields: [storeId], references: [id])
+  storeId     String
+  item        Item     @relation(fields: [itemId], references: [id])
+  itemId      String
+  targetQuantity Float?
+  targetText   String?
+  unit         String?
+  isActive     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([storeId, itemId])
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("restaurant") // restaurant, cafe, hotel, etc.
+  address     String?
+  phone       String?
+  email       String?
+  contactName String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveryPlans DeliveryPlanCustomer[]
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  items     Item[]
+}
+
+model Item {
+  id           String    @id @default(cuid())
+  name         String    @unique
+  category     Category  @relation(fields: [categoryId], references: [id])
+  categoryId   String
+  unit         String?
+  targetNumber Float?
+  targetText   String?
+  isActive     Boolean   @default(true)
+  sortOrder    Int       @default(0)
+
+  stocktakeItems StocktakeItem[]
+  deliveryItems  DeliveryItem[]
+  recipeIngredients RecipeIngredient[]
+  productionIngredients ProductionIngredient[]
+  orderItems OrderItem[]
+  storeInventory StoreInventory[]
+}
+
+model Stocktake {
+  id          String          @id @default(cuid())
+  store       Store           @relation(fields: [storeId], references: [id])
+  storeId     String
+  date        DateTime
+  photoUrl    String?
+  notes       String?
+  submittedAt DateTime        @default(now())
+
+  items StocktakeItem[]
+
+  @@index([storeId, date])
+}
+
+model StocktakeItem {
+  id          String    @id @default(cuid())
+  stocktake   Stocktake @relation(fields: [stocktakeId], references: [id])
+  stocktakeId String
+  item        Item      @relation(fields: [itemId], references: [id])
+  itemId      String
+  quantity    Float?
+  note        String?
+
+  @@unique([stocktakeId, itemId])
+}
+
+enum DeliveryStatus {
+  DRAFT
+  CONFIRMED
+  SENT
+}
+
+model DeliveryPlan {
+  id        String         @id @default(cuid())
+  store     Store?         @relation(fields: [storeId], references: [id])
+  storeId   String?
+  date      DateTime
+  status    DeliveryStatus @default(DRAFT)
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  items     DeliveryItem[]
+  customers DeliveryPlanCustomer[]
+
+  @@index([storeId, date])
+}
+
+model DeliveryPlanCustomer {
+  id        String       @id @default(cuid())
+  plan      DeliveryPlan @relation(fields: [planId], references: [id])
+  planId    String
+  customer  Customer     @relation(fields: [customerId], references: [id])
+  customerId String
+  priority  Int          @default(0) // delivery order
+  notes     String?
+
+  @@unique([planId, customerId])
+}
+
+model DeliveryItem {
+  id        String       @id @default(cuid())
+  plan      DeliveryPlan @relation(fields: [planId], references: [id])
+  planId    String
+  item      Item         @relation(fields: [itemId], references: [id])
+  itemId    String
+  quantity  Float
+  note      String?
+
+  @@unique([planId, itemId])
+}
+
+// Recipe system for gelato production
+model Recipe {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  category    String   @default("gelato") // gelato, sorbet, etc.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ingredients RecipeIngredient[]
+  productions Production[]
+}
+
+model RecipeIngredient {
+  id         String  @id @default(cuid())
+  recipe     Recipe  @relation(fields: [recipeId], references: [id])
+  recipeId   String
+  item       Item    @relation(fields: [itemId], references: [id])
+  itemId     String
+  quantity   Float   // amount needed per batch
+  unit       String  // kg, g, l, ml, etc.
+  notes      String?
+
+  @@unique([recipeId, itemId])
+}
+
+// Production tracking
+model Production {
+  id          String   @id @default(cuid())
+  recipe      Recipe   @relation(fields: [recipeId], references: [id])
+  recipeId    String
+  batchSize   Float    // how many liters/kilos produced
+  batchUnit   String   @default("kg") // kg, l, etc.
+  producedAt  DateTime @default(now())
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  ingredients ProductionIngredient[]
+}
+
+model ProductionIngredient {
+  id           String     @id @default(cuid())
+  production   Production @relation(fields: [productionId], references: [id])
+  productionId String
+  item         Item       @relation(fields: [itemId], references: [id])
+  itemId       String
+  quantityUsed Float      // actual amount used
+  unit         String     // kg, g, l, ml, etc.
+}
+
+// Supplier and ordering system
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders Order[]
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING
+  CONFIRMED
+  RECEIVED
+  CANCELLED
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  supplier    Supplier?   @relation(fields: [supplierId], references: [id])
+  supplierId  String?
+  status      OrderStatus @default(DRAFT)
+  orderDate   DateTime    @default(now())
+  expectedDate DateTime?
+  receivedDate DateTime?
+  totalAmount Float?
+  currency    String      @default("AUD")
+  notes       String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  items OrderItem[]
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  order       Order   @relation(fields: [orderId], references: [id])
+  orderId     String
+  item        Item    @relation(fields: [itemId], references: [id])
+  itemId      String
+  quantity    Float
+  unit        String
+  unitPrice   Float?
+  totalPrice  Float?
+  notes       String?
+
+  @@unique([orderId, itemId])
+}
+
+// User authentication and authorization system
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // hashed password
+  firstName String
+  lastName  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles     UserRole[]
+  sessions  Session[]
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  resource    String   // e.g., 'stores', 'orders', 'production'
+  action      String   // e.g., 'create', 'read', 'update', 'delete'
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@unique([resource, action])
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+  role   Role   @relation(fields: [roleId], references: [id])
+  roleId String
+
+  @@unique([userId, roleId])
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  role         Role       @relation(fields: [roleId], references: [id])
+  roleId       String
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  permissionId String
+
+  @@unique([roleId, permissionId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
