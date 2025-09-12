@@ -69,10 +69,11 @@ export default function LoginPage() {
 
         setSuccess('Login successful! Redirecting...');
 
-        // Redirect after a short delay
+        // Wait for auth state to update before redirecting
         setTimeout(() => {
-          router.push('/');
-        }, 1000);
+          // Force a page reload to ensure middleware sees the updated auth state
+          window.location.href = '/';
+        }, 1500);
       } else {
         setError(data.error || 'Login failed');
       }
