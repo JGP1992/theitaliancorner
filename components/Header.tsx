@@ -33,93 +33,100 @@ export default function Header() {
         </Link>
         <nav className="flex items-center space-x-6 text-sm text-gray-600">
           {isAuthenticated && user ? (
-            <span className="text-gray-900 font-medium">
-              Hello, {user.firstName}
-            </span>
-          ) : null}
-          <span className="text-gray-300">·</span>
-
-          {/* Dashboard */}
-          <Link href="/" className="hover:text-gray-900 transition-colors font-medium">Dashboard</Link>
-          <span className="text-gray-300">·</span>
-
-          {/* Inventory Dropdown */}
-          <div className="relative dropdown-menu">
-            <button
-              onClick={() => setShowInventoryMenu(!showInventoryMenu)}
-              className="hover:text-gray-900 transition-colors font-medium flex items-center gap-1"
-            >
-              Inventory
-              <ChevronDown className="h-4 w-4" />
-            </button>
-            {showInventoryMenu && (
-              <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
-                <div className="py-1">
-                  <Link href="/inventory" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                    📊 Inventory Dashboard
-                  </Link>
-                  <Link href="/stocktakes" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                    📝 Stocktakes
-                  </Link>
-                  <Link href="/orders" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                    📦 Orders & Supplies
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
-          <span className="text-gray-300">·</span>
-
-          {/* Production */}
-          <Link href="/factory" className="hover:text-gray-900 transition-colors font-medium">Production</Link>
-          <span className="text-gray-300">·</span>
-
-          {/* Deliveries */}
-          <Link href="/staff-deliveries" className="hover:text-gray-900 transition-colors font-medium">Deliveries</Link>
-          <span className="text-gray-300">·</span>
-
-          {/* Stores */}
-          <Link href="/stores" className="hover:text-gray-900 transition-colors font-medium">Stores</Link>
-          <span className="text-gray-300">·</span>
-
-          {/* Admin Menu for admin/manager */}
-          {isAdminOrManager && (
             <>
+              <span className="text-gray-900 font-medium">
+                Hello, {user.firstName}
+              </span>
+              <span className="text-gray-300">·</span>
+
+              {/* Dashboard */}
+              <Link href="/" className="hover:text-gray-900 transition-colors font-medium">Dashboard</Link>
+              <span className="text-gray-300">·</span>
+
+              {/* Inventory Dropdown */}
               <div className="relative dropdown-menu">
                 <button
-                  onClick={() => setShowAdminMenu(!showAdminMenu)}
+                  onClick={() => setShowInventoryMenu(!showInventoryMenu)}
                   className="hover:text-gray-900 transition-colors font-medium flex items-center gap-1"
                 >
-                  Admin
+                  Inventory
                   <ChevronDown className="h-4 w-4" />
                 </button>
-                {showAdminMenu && (
+                {showInventoryMenu && (
                   <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
                     <div className="py-1">
-                      <Link href="/admin" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        🏠 Admin Dashboard
+                      <Link href="/inventory" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        📊 Inventory Dashboard
                       </Link>
-                      <Link href="/admin/users" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        👥 Manage Users
+                      <Link href="/stocktakes" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        📝 Stocktakes
                       </Link>
-                      <Link href="/admin/stores" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        🏪 Store Management
-                      </Link>
-                      <Link href="/admin/roles" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        🛡️ Manage Roles
-                      </Link>
-                      <Link href="/flavors" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                        🍦 Flavors
+                      <Link href="/orders" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        📦 Orders & Supplies
                       </Link>
                     </div>
                   </div>
                 )}
               </div>
               <span className="text-gray-300">·</span>
-            </>
-          )}
 
-          <UserMenu />
+              {/* Production */}
+              <Link href="/factory" className="hover:text-gray-900 transition-colors font-medium">Production</Link>
+              <span className="text-gray-300">·</span>
+
+              {/* Deliveries */}
+              <Link href="/staff-deliveries" className="hover:text-gray-900 transition-colors font-medium">Deliveries</Link>
+              <span className="text-gray-300">·</span>
+
+              {/* Stores */}
+              <Link href="/stores" className="hover:text-gray-900 transition-colors font-medium">Stores</Link>
+              <span className="text-gray-300">·</span>
+
+              {/* Admin Menu for admin/manager */}
+              {isAdminOrManager && (
+                <>
+                  <div className="relative dropdown-menu">
+                    <button
+                      onClick={() => setShowAdminMenu(!showAdminMenu)}
+                      className="hover:text-gray-900 transition-colors font-medium flex items-center gap-1"
+                    >
+                      Admin
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    {showAdminMenu && (
+                      <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                        <div className="py-1">
+                          <Link href="/admin" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            🏠 Admin Dashboard
+                          </Link>
+                          <Link href="/admin/users" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            👥 Manage Users
+                          </Link>
+                          <Link href="/admin/stores" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            🏪 Store Management
+                          </Link>
+                          <Link href="/admin/roles" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            🛡️ Manage Roles
+                          </Link>
+                          <Link href="/flavors" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            🍦 Flavors
+                          </Link>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-gray-300">·</span>
+                </>
+              )}
+
+              <UserMenu />
+            </>
+          ) : (
+            // Show login link when not authenticated
+            <Link href="/login" className="hover:text-gray-900 transition-colors font-medium text-blue-600">
+              Login
+            </Link>
+          )}
         </nav>
       </div>
     </header>
