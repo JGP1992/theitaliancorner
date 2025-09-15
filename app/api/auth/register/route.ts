@@ -4,6 +4,21 @@ import { prisma } from '../../../../app/lib/prisma';
 
 export async function POST(req: NextRequest) {
   try {
+    // Registration guard: allow if explicitly enabled, or if no users exist (first-admin bootstrap),
+    // or if a valid BOOTSTRAP_TOKEN is provided in header 'x-bootstrap-token'.
+    const allowPublic = (process.env.ALLOW_PUBLIC_REGISTRATION || '').toLowerCase() === 'true';
+    const totalUsers = await prisma.user.count();
+    const hasUsers = totalUsers > 0;
+    const bootstrapToken = process.env.BOOTSTRAP_TOKEN?.trim();
+    const providedToken = req.headers.get('x-bootstrap-token')?.trim();
+    if (!allowPublic) {
+      const tokenOk = bootstrapToken && providedToken && bootstrapToken === providedToken;
+      const firstAdminOk = !hasUsers; // allow creating the very first user without token
+      if (!firstAdminOk && !tokenOk) {
+        return NextResponse.json({ error: 'Registration disabled' }, { status: 403 });
+      }
+    }
+
     const { email, password, firstName, lastName, roleIds } = await req.json();
 
     if (!email || !password || !firstName || !lastName) {

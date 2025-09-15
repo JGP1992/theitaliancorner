@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Local and Production Setup
 
-## Getting Started
+This app uses Next.js 15, Prisma, and PostgreSQL. Auth is JWT via HttpOnly cookie.
 
-First, run the development server:
+### 1) Prereqs
+- Node 18+ and npm
+- Docker (for local Postgres)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+### 2) Configure env
+- Copy .env.example to .env.local and adjust as needed.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3) Start local Postgres
+- Start the DB: docker compose up -d
+- DB URL used by default: postgresql://stocktake:stocktake@localhost:5433/stocktake?schema=public
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4) Install + migrate + seed
+- Install deps: npm install
+- Push schema: npm run db:push
+- Seed data: npm run db:seed
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 5) Run dev
+- Start: npm run dev
+- Health: http://localhost:3000/api/health
+- Login: admin@stocktake.com / admin123
 
-## Learn More
+### Vercel deployment
+1) Create a Postgres DB (e.g., Neon, Supabase, Railway) and get a DATABASE_URL (ssl required).
+2) In Vercel Project Settings > Environment Variables, add:
+	- DATABASE_URL = postgresql://... (with sslmode=require if needed)
+	- JWT_SECRET = strong random secret
+	- NODE_ENV = production
+3) Deploy. On first deploy, run a one-time migration via Vercel CLI or run a job locally:
+	- Locally: set DATABASE_URL to prod DB, then run `npm run db:push` and `npm run db:seed` once.
+4) Visit your site. Health at /api/health.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Notes
+- Middleware protects non-API routes; /login is public and redirects if already authenticated.
+- All client fetches to protected APIs include credentials and no-store cache.

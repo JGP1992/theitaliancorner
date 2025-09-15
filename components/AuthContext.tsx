@@ -27,6 +27,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  // Start in loading state to avoid flicker/loops before first auth check completes
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
@@ -34,10 +35,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkAuth = async () => {
     try {
-      const response = await fetch('/api/auth/status');
+      setIsLoading(true);
+      const response = await fetch('/api/auth/status', { credentials: 'include', cache: 'no-store' as RequestCache });
+      if (!response.ok) {
+        setUser(null);
+        localStorage.removeItem('user');
+        window.dispatchEvent(new CustomEvent('userLogout'));
+        return;
+      }
       const data = await response.json();
 
-      if (data.authenticated && data.user) {
+      if (data?.authenticated && data?.user) {
         setUser(data.user);
         // Update localStorage for other components
         localStorage.setItem('user', JSON.stringify(data.user));
@@ -63,10 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('userLogin'));
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {}
     setUser(null);
     localStorage.removeItem('user');
-    document.cookie = 'authToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     window.dispatchEvent(new CustomEvent('userLogout'));
     router.push('/login');
   };
@@ -80,6 +90,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // Bootstrap from localStorage to avoid header/nav flicker
+    try {
+      const cached = localStorage.getItem('user');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.id) {
+          setUser(parsed);
+        }
+      }
+    } catch {}
     checkAuth();
   }, []);
 
@@ -89,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isAuthenticated) {
         checkAuth();
       }
-    }, 5 * 60 * 1000); // Check every 5 minutes
+    }, 10 * 60 * 1000); // Check every 10 minutes instead of 5
 
     return () => clearInterval(interval);
   }, [isAuthenticated]);

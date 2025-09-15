@@ -15,6 +15,8 @@ type SelectedItem = {
   name: string;
   quantity: number;
   unit?: string;
+  packagingOptionId?: string;
+  weightKg?: number;
 };
 
 type SubmitResult = {
@@ -42,6 +44,9 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
   const [destinationItems, setDestinationItems] = useState<Record<string, SelectedItem[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
+  // Minimal packaging metadata for client-side validation of variable-weight trays
+  const [storePackagingMeta, setStorePackagingMeta] = useState<Record<string, { variableWeight: boolean }>>({});
+  const [customerPackagingMeta, setCustomerPackagingMeta] = useState<Record<string, { variableWeight: boolean }>>({});
 
   useEffect(() => {
     const allDestinations: Destination[] = [
@@ -56,6 +61,35 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
     ];
     setItemSections(allDestinations);
   }, [selectedStores, selectedCustomers, stores, customers]);
+
+  // Fetch packaging metadata for validation (IDs and variableWeight only)
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [storeRes, custRes] = await Promise.all([
+          fetch('/api/packaging-options?audience=store', { credentials: 'include' }),
+          fetch('/api/packaging-options?audience=customer', { credentials: 'include' })
+        ]);
+        if (!cancelled) {
+          if (storeRes.ok) {
+            const data = await storeRes.json();
+            const map: Record<string, { variableWeight: boolean }> = {};
+            (data || []).forEach((p: any) => { map[p.id] = { variableWeight: !!p.variableWeight }; });
+            setStorePackagingMeta(map);
+          }
+          if (custRes.ok) {
+            const data = await custRes.json();
+            const map: Record<string, { variableWeight: boolean }> = {};
+            (data || []).forEach((p: any) => { map[p.id] = { variableWeight: !!p.variableWeight }; });
+            setCustomerPackagingMeta(map);
+          }
+        }
+      } catch {}
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
 
   // Initialize destination items when destinations change
   useEffect(() => {
@@ -100,23 +134,67 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
     setSubmitResult(null);
 
     try {
-      const formData = new FormData(e.target as HTMLFormElement);
-      
+      const formEl = e.target as HTMLFormElement;
+      const formData = new FormData(formEl);
+
+      // Require at least one destination
+      if (selectedStores.length === 0 && selectedCustomers.length === 0) {
+        setSubmitResult({ success: false, error: 'Please select at least one store or customer.' });
+        return;
+      }
+
+      // Require at least one item with positive qty across destinations
+      const anyItems = Object.values(destinationItems).some((items) => items && items.length > 0);
+      if (!anyItems) {
+        setSubmitResult({ success: false, error: 'Please add at least one item for a selected destination.' });
+        return;
+      }
+
+      // Validate each destination items for qty > 0. For variable-weight packaging, weight is optional unless sending immediately.
+      for (const [key, items] of Object.entries(destinationItems)) {
+        const [type] = key.split('_') as ['store' | 'customer', string];
+        for (const it of items) {
+          if (!(typeof it.quantity === 'number' && it.quantity > 0)) {
+            setSubmitResult({ success: false, error: `Quantity must be greater than 0 for '${it.name}'.` });
+            return;
+          }
+          if (it.packagingOptionId) {
+            const meta = type === 'store' ? storePackagingMeta[it.packagingOptionId] : customerPackagingMeta[it.packagingOptionId];
+            // If status is SENT, enforce weight; otherwise allow capturing later.
+            const statusSelect = (e.target as HTMLFormElement).elements.namedItem('status') as HTMLSelectElement | null;
+            const immediateStatus = statusSelect?.value as 'DRAFT' | 'CONFIRMED' | 'SENT' | undefined;
+            if (meta && meta.variableWeight && immediateStatus === 'SENT') {
+              if (!(typeof it.weightKg === 'number' && it.weightKg > 0)) {
+                setSubmitResult({ success: false, error: `Weight (kg) is required to send now for '${it.name}'. Choose Draft/Confirmed or enter weight.` });
+                return;
+              }
+            }
+          }
+        }
+      }
+
       // Add selected stores and customers to form data
       selectedStores.forEach(store => formData.append('stores', store));
       selectedCustomers.forEach(customer => formData.append('customers', customer));
-      
+
       // Add items data for each destination - ensure all items are included
       Object.entries(destinationItems).forEach(([key, items]) => {
         if (items.length > 0) {
-          const itemString = items.map(item => `${item.name}:${item.quantity}`).join('\n');
+          // Format per line: name:quantity[:packagingOptionId][:weightKg]
+          const itemString = items.map(item => {
+            const parts: string[] = [item.name, String(item.quantity)];
+            if (item.packagingOptionId) parts.push(item.packagingOptionId);
+            if (item.weightKg !== undefined && item.weightKg !== null && !Number.isNaN(item.weightKg)) {
+              parts.push(String(item.weightKg));
+            }
+            return parts.join(':');
+          }).join('\n');
           // Convert the state key to the API-expected key format
           const [type, id] = key.split('_');
           const dest = itemSections.find(d => d.id === id && d.type === type);
           if (dest) {
             const apiKey = `items_${type}_${type === 'store' ? dest.slug : dest.id}`;
             formData.append(apiKey, itemString);
-            console.log(`Setting ${apiKey}: ${itemString}`);
           }
         }
       });
@@ -124,20 +202,26 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
       const response = await fetch('/api/create-delivery-plan', {
         method: 'POST',
         body: formData,
+        credentials: 'include',
       });
 
       const result = await response.json();
       setSubmitResult(result);
-      
+
+      if (!response.ok) {
+        throw new Error(result?.error || `Request failed: ${response.status}`);
+      }
+
       if (result.success) {
         // Reset form on success
         setSelectedStores([]);
         setSelectedCustomers([]);
         setDestinationItems({});
         setItemSections([]);
+        formEl.reset();
       }
-    } catch {
-      setSubmitResult({ success: false, error: 'Failed to submit form' });
+    } catch (err: any) {
+      setSubmitResult({ success: false, error: err?.message || 'Failed to submit form' });
     } finally {
       setIsSubmitting(false);
     }
@@ -156,6 +240,8 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
           e.preventDefault();
         }
       }}>
+        {/* Hidden input to ensure formData always has a deterministic key */}
+        <input type="hidden" name="_qd" value="1" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-700">Delivery Date</label>
@@ -163,6 +249,7 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
               name="date"
               type="date"
               defaultValue={new Date().toISOString().slice(0, 10)}
+              required
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -250,11 +337,12 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
                     selectedItems={items}
                     onItemsChange={(items) => handleDestinationItemsChange(destinationKey, items)}
                     destinationName={dest.name}
+                    destinationType={dest.type}
                   />
-                  {/* Debug: Show current items */}
+                  {/* Current items summary (hidden from UI; assistive readers only) */}
                   {items.length > 0 && (
-                    <div className="mt-2 text-xs text-gray-500">
-                      Debug: {items.length} items - {items.map(item => `${item.name}:${item.quantity}`).join(', ')}
+                    <div className="sr-only">
+                      {items.length} items selected for {dest.name}
                     </div>
                   )}
                 </div>
@@ -263,15 +351,31 @@ function QuickDelivery({ customers = [], stores = [] }: { customers?: { id: stri
           )}
         </div>
 
-        <div className="flex justify-end pt-4">
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="px-8 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
-          >
-            {isSubmitting ? 'Creating...' : 'Create Delivery Plans'}
-          </button>
-        </div>
+        {(() => {
+          const hasDestinations = selectedStores.length > 0 || selectedCustomers.length > 0;
+          const hasAnyItems = Object.values(destinationItems).some((items) => items && items.length > 0);
+          const submitDisabled = isSubmitting || !hasDestinations || !hasAnyItems;
+          return (
+            <div className="pt-4">
+              {!hasDestinations && (
+                <p className="text-sm text-red-600 mb-2">Select at least one store or customer.</p>
+              )}
+              {hasDestinations && !hasAnyItems && (
+                <p className="text-sm text-red-600 mb-2">Add at least one item for a selected destination.</p>
+              )}
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitDisabled}
+                  title={!hasDestinations ? 'Select at least one destination' : (!hasAnyItems ? 'Add at least one item' : '')}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed text-base"
+                >
+                  {isSubmitting ? 'Creating...' : 'Create Delivery Plans'}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </form>
 
       {/* Submit Result */}

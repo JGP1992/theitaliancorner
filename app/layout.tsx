@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Header from '../components/Header';
+import Script from 'next/script';
 import { AuthProvider } from '../components/AuthContext';
 
 const geistSans = Geist({
@@ -34,6 +35,40 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`}>
         <AuthProvider>
           <div className="min-h-screen">
+            {/* Auto-recover from ChunkLoadError (stale client chunks) */}
+            <Script id="chunkloaderror-recovery" strategy="afterInteractive">
+              {`
+              (function(){
+                function isChunkError(err){
+                  if(!err) return false;
+                  var msg = (err && (err.message||err.toString())) || '';
+                  return /ChunkLoadError|Loading chunk [^ ]+ failed/i.test(msg);
+                }
+                function clearNextCache(){
+                  try {
+                    if (window.__next) {
+                      // @ts-ignore
+                      var hooks = window.__next;
+                    }
+                  } catch (_) {}
+                  try { caches && caches.keys && caches.keys().then(keys => keys.forEach(k => caches.delete(k))); } catch(_){ }
+                }
+                window.addEventListener('error', function(e){
+                  if(isChunkError(e?.error)){
+                    clearNextCache();
+                    // Force a hard reload without cache
+                    if ('reload' in location) location.reload();
+                  }
+                });
+                window.addEventListener('unhandledrejection', function(e){
+                  if(isChunkError(e?.reason)){
+                    clearNextCache();
+                    if ('reload' in location) location.reload();
+                  }
+                });
+              })();
+              `}
+            </Script>
             <Header />
             <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
             <footer className="mx-auto max-w-7xl px-6 py-8 text-xs text-gray-500 border-t border-gray-200">
@@ -47,7 +82,7 @@ export default function RootLayout({
                   <span>© {new Date().getFullYear()} TIC Gelato</span>
                 </div>
                 <div className="text-gray-400">
-                  Powered by TIC Technologies
+                  Powered by Webhoot.
                 </div>
               </div>
             </footer>

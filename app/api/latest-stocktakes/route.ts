@@ -24,6 +24,12 @@ export async function GET(request: NextRequest) {
       take: 6, // Show only the 6 most recent stocktakes
       include: {
         store: true,
+        submittedBy: {
+          select: {
+            firstName: true,
+            lastName: true,
+          }
+        },
         items: {
           include: { item: true },
           where: { quantity: { not: null } }

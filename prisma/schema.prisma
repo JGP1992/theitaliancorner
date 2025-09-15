@@ -72,6 +72,7 @@ model Item {
   unit         String?
   targetNumber Float?
   targetText   String?
+  defaultQuantity Float?
   isActive     Boolean   @default(true)
   sortOrder    Int       @default(0)
 
@@ -81,6 +82,9 @@ model Item {
   productionIngredients ProductionIngredient[]
   orderItems OrderItem[]
   storeInventory StoreInventory[]
+  packagingOptions ItemPackagingOption[]
+  // Back relation for scheduled production tasks
+  productionTasks ProductionTask[]
 }
 
 model Stocktake {
@@ -91,6 +95,10 @@ model Stocktake {
   photoUrl    String?
   notes       String?
   submittedAt DateTime        @default(now())
+  submittedBy User?           @relation("StocktakeSubmittedBy", fields: [submittedByUserId], references: [id])
+  submittedByUserId String?
+  /// If true, this represents a full master stocktake (typically at the Factory)
+  isMaster    Boolean         @default(false)
 
   items StocktakeItem[]
 
@@ -113,6 +121,56 @@ enum DeliveryStatus {
   DRAFT
   CONFIRMED
   SENT
+}
+
+// Packaging support for deliveries (cups, tubs, trays with optional variable weight)
+enum PackagingType {
+  CUP
+  TUB
+  TRAY
+}
+
+enum UnitType {
+  ML
+  L
+  KG
+}
+
+model PackagingOption {
+  id            String        @id @default(cuid())
+  name          String        @unique // Display label, e.g., "125 ml cup", "5 L tub", "2.5 kg tray"
+  type          PackagingType
+  sizeValue     Float?        // e.g., 125, 2, 5, 2.5 depending on unit
+  sizeUnit      UnitType?     // ML, L, KG
+  variableWeight Boolean      @default(false) // if true, capture weight per delivery item (e.g., trays)
+  // Audience flags: which destinations can use this packaging
+  allowStores    Boolean       @default(true)
+  allowCustomers Boolean       @default(true)
+  isActive      Boolean       @default(true)
+  sortOrder     Int           @default(0)
+
+  deliveryItems DeliveryItem[]
+  items         ItemPackagingOption[]
+
+  @@index([type, isActive])
+}
+
+// Join table: which packaging options are allowed for which items (flavors)
+model ItemPackagingOption {
+  id                 String          @id @default(cuid())
+  item               Item            @relation(fields: [itemId], references: [id])
+  itemId             String
+  packagingOption    PackagingOption @relation(fields: [packagingOptionId], references: [id])
+  packagingOptionId  String
+  isDefault          Boolean         @default(false)
+  isDefaultForStores Boolean         @default(false)
+  isDefaultForCustomers Boolean      @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([itemId, packagingOptionId])
+  @@index([itemId])
+  @@index([packagingOptionId])
 }
 
 model DeliveryPlan {
@@ -152,7 +210,13 @@ model DeliveryItem {
   quantity  Float
   note      String?
 
-  @@unique([planId, itemId])
+  // Optional packaging for this delivery line (e.g., 5L tub, 125ml cup, tray)
+  packagingOption  PackagingOption? @relation(fields: [packagingOptionId], references: [id])
+  packagingOptionId String?
+  // If packaging has variable weight (e.g., trays), allow capturing the weight at load time
+  weightKg Float?
+
+  @@index([planId])
 }
 
 // Recipe system for gelato production
@@ -204,6 +268,38 @@ model ProductionIngredient {
   itemId       String
   quantityUsed Float      // actual amount used
   unit         String     // kg, g, l, ml, etc.
+}
+
+// Scheduled production tasks (what the Factory should make on specific days)
+enum ProductionTaskStatus {
+  SCHEDULED
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+model ProductionTask {
+  id           String                @id @default(cuid())
+  date         DateTime              // day the task is scheduled
+  item         Item                  @relation(fields: [itemId], references: [id])
+  itemId       String
+  quantity     Float                 // number of tubs/batches/etc.
+  unit         String                @default("units") // e.g., tubs, kg, l
+  status       ProductionTaskStatus  @default(SCHEDULED)
+  notes        String?
+
+  createdBy    User?                 @relation("TaskCreatedBy", fields: [createdByUserId], references: [id])
+  createdByUserId String?
+  assignedTo   User?                 @relation("TaskAssignedTo", fields: [assignedToUserId], references: [id])
+  assignedToUserId String?
+
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@index([date])
+  @@index([status, date])
 }
 
 // Supplier and ordering system
@@ -274,6 +370,10 @@ model User {
 
   roles     UserRole[]
   sessions  Session[]
+  submittedStocktakes Stocktake[] @relation("StocktakeSubmittedBy")
+  // Back relations for ProductionTask assignments/creation
+  productionTasksCreated  ProductionTask[] @relation("TaskCreatedBy")
+  productionTasksAssigned ProductionTask[] @relation("TaskAssignedTo")
 }
 
 model Role {
@@ -331,4 +431,22 @@ model Session {
 
   @@index([userId])
   @@index([token])
+}
+
+/// Audit log of user actions
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  userEmail   String?
+  action      String
+  resource    String
+  resourceId  String?
+  metadata    Json?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([resource, createdAt])
 }

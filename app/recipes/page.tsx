@@ -1,5 +1,7 @@
 'use client';
 
+import '../globals.css';
+
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, ChefHat } from 'lucide-react';
 
@@ -37,6 +39,7 @@ export default function RecipesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
+  const [producingRecipe, setProducingRecipe] = useState<Recipe | null>(null);
 
   useEffect(() => {
     loadRecipes();
@@ -118,6 +121,15 @@ export default function RecipesPage() {
         </button>
       </div>
 
+      <div className="mb-6">
+        <a
+          href="/production/analytics"
+          className="inline-block text-sm text-blue-600 hover:text-blue-800 underline"
+        >
+          View Production Analytics →
+        </a>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {recipes.map((recipe) => (
           <div key={recipe.id} className="bg-white rounded-lg shadow-md p-6">
@@ -159,7 +171,10 @@ export default function RecipesPage() {
             </div>
 
             <div className="mt-4 pt-4 border-t">
-              <button className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+              <button
+                onClick={() => setProducingRecipe(recipe)}
+                className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+              >
                 Produce Batch
               </button>
             </div>
@@ -203,6 +218,16 @@ export default function RecipesPage() {
           }}
         />
       )}
+
+      {producingRecipe && (
+        <ProduceBatchModal
+          recipe={producingRecipe}
+          onClose={() => setProducingRecipe(null)}
+          onProduced={() => {
+            setProducingRecipe(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -212,6 +237,127 @@ interface RecipeFormProps {
   items: Item[];
   onClose: () => void;
   onSave: () => void;
+}
+
+interface ProduceBatchModalProps {
+  recipe: Recipe;
+  onClose: () => void;
+  onProduced: () => void;
+}
+
+function ProduceBatchModal({ recipe, onClose, onProduced }: ProduceBatchModalProps) {
+  const [batchSize, setBatchSize] = useState<number>(1);
+  const [batchUnit, setBatchUnit] = useState<string>('batch');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const scaledIngredients = recipe.ingredients.map((ing) => ({
+    ...ing,
+    scaledQuantity: Number((ing.quantity * batchSize).toFixed(3))
+  }));
+
+  const canSubmit = scaledIngredients.length > 0 && batchSize > 0 && !isSubmitting;
+
+  const handleProduce = async () => {
+    if (!canSubmit) return;
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        recipeId: recipe.id,
+        batchSize,
+        batchUnit,
+        ingredients: scaledIngredients.map((ing) => ({
+          itemId: ing.item.id,
+          quantityUsed: ing.scaledQuantity,
+          unit: ing.unit
+        }))
+      };
+
+      const res = await fetch('/api/productions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Failed to produce: ${err.error || err.message || 'Unknown error'}`);
+        return;
+      }
+
+      onProduced();
+      alert('Batch recorded successfully.');
+    } catch (e) {
+      console.error(e);
+      alert('Failed to produce batch.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">Produce Batch</h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <p className="text-gray-700 mb-1 font-medium">{recipe.name}</p>
+              {recipe.description && (
+                <p className="text-gray-500 text-sm mb-2">{recipe.description}</p>
+              )}
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(parseFloat(e.target.value) || 0)}
+                  className="px-3 py-2 border rounded w-24"
+                />
+                <select
+                  value={batchUnit}
+                  onChange={(e) => setBatchUnit(e.target.value)}
+                  className="px-3 py-2 border rounded"
+                >
+                  <option value="batch">batch</option>
+                  <option value="kg">kg</option>
+                  <option value="l">l</option>
+                  <option value="tubs">tubs</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-medium text-gray-900 mb-3">Ingredients (scaled)</h3>
+              <div className="space-y-2">
+                {scaledIngredients.map((ing) => (
+                  <div key={ing.id} className="flex justify-between text-sm">
+                    <span>{ing.item.name}</span>
+                    <span className="text-gray-600">{ing.scaledQuantity} {ing.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-6 border-t">
+              <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+              <button
+                onClick={handleProduce}
+                disabled={!canSubmit}
+                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {isSubmitting ? 'Producing…' : 'Produce'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RecipeForm({ recipe, items, onClose, onSave }: RecipeFormProps) {

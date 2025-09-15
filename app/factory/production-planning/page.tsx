@@ -1,5 +1,6 @@
 'use client';
 
+import '../../globals.css';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
@@ -45,6 +46,19 @@ export default function ProductionPlanningPage() {
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(7);
   const [activeTab, setActiveTab] = useState<'production' | 'inventory'>('production');
+  const [error, setError] = useState<string | null>(null);
+  const [factoryOnly, setFactoryOnly] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem('production:factoryOnly') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('production:factoryOnly', String(factoryOnly)); } catch {}
+  }, [factoryOnly]);
 
   useEffect(() => {
     fetchProductionData();
@@ -53,11 +67,20 @@ export default function ProductionPlanningPage() {
   const fetchProductionData = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/production-plan?days=${days}`);
-      const productionData = await response.json();
-      setData(productionData);
+      setError(null);
+      const response = await fetch(`/api/production-plan?days=${days}` , { credentials: 'include', cache: 'no-store' });
+      const json = await response.json();
+      if (!response.ok) {
+        console.error('production-plan API error:', response.status, json?.error || json);
+        setData(null);
+        setError(typeof json?.error === 'string' ? json.error : 'Failed to load production plan');
+      } else {
+        setData(json as ProductionData);
+      }
     } catch (error) {
       console.error('Failed to fetch production data:', error);
+      setError('Failed to fetch production data');
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -82,7 +105,7 @@ export default function ProductionPlanningPage() {
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
-            Failed to load production data
+            {error ?? 'Failed to load production data'}
           </div>
           <button
             onClick={fetchProductionData}
@@ -140,13 +163,26 @@ export default function ProductionPlanningPage() {
                 <option value={30}>Next month</option>
               </select>
             </div>
-            <div className="text-sm text-gray-600">
-              {data.dateRange.start} to {data.dateRange.end}
+            <div className="flex items-center gap-6">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={factoryOnly}
+                  onChange={(e) => setFactoryOnly(e.target.checked)}
+                />
+                Factory-only on hand
+              </label>
+              <div className="text-sm text-gray-600">
+              {new Date(data.dateRange?.start ?? new Date().toISOString().split('T')[0]).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+              {' '}to{' '}
+              {new Date(data.dateRange?.end ?? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Summary Cards */}
+  {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-sm p-6 border-l-4 border-purple-500">
             <div className="flex items-center">
@@ -197,6 +233,40 @@ export default function ProductionPlanningPage() {
           </div>
         </div>
 
+        {/* Actions */}
+        <div className="mb-4 flex items-center justify-end gap-3">
+          <button
+            onClick={() => {
+              if (!data) return;
+              const rows = [['Flavor','Needed','On hand','Shortfall']];
+              for (const requirement of data.productionPlan) {
+                const inv = data.inventory.find((i) => i.category === 'Gelato Flavors' && i.itemName === requirement.flavorName);
+                const onHand = (() => {
+                  if (!inv) return 0;
+                  if (!factoryOnly) return inv.totalQuantity ?? 0;
+                  const factoryEntries = (inv.stocktakes ?? []).filter(st => st.store?.toLowerCase().includes('factory'));
+                  return factoryEntries.reduce((sum, st) => sum + (st.quantity || 0), 0);
+                })();
+                const shortfall = Math.max(0, requirement.totalTubs - onHand);
+                rows.push([requirement.flavorName, String(requirement.totalTubs), String(onHand), String(shortfall)]);
+              }
+              const csv = rows.map((r) => r.map((c) => '"' + String(c).replaceAll('"','""') + '"').join(',')).join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `production-shortfalls-${new Date().toISOString().slice(0,10)}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-2 border rounded bg-white hover:bg-gray-50 text-sm"
+          >
+            Export Shortfalls CSV
+          </button>
+        </div>
+
         {/* Tabs */}
         <div className="mb-6">
           <div className="border-b border-gray-200">
@@ -241,7 +311,17 @@ export default function ProductionPlanningPage() {
                 </p>
               </div>
             ) : (
-              data.productionPlan.map((requirement) => (
+              data.productionPlan.map((requirement) => {
+                const inv = data.inventory.find((i) => i.category === 'Gelato Flavors' && i.itemName === requirement.flavorName);
+                const onHand = (() => {
+                  if (!inv) return 0;
+                  if (!factoryOnly) return inv.totalQuantity ?? 0;
+                  // Sum only stocktakes where store name indicates factory
+                  const factoryEntries = (inv.stocktakes ?? []).filter(st => st.store?.toLowerCase().includes('factory'));
+                  return factoryEntries.reduce((sum, st) => sum + (st.quantity || 0), 0);
+                })();
+                const shortfall = Math.max(0, requirement.totalTubs - onHand);
+                return (
                 <div key={requirement.flavorName} className="bg-white rounded-lg shadow-sm border">
                   <div className="px-6 py-4 border-b border-gray-200">
                     <div className="flex items-center justify-between">
@@ -260,11 +340,19 @@ export default function ProductionPlanningPage() {
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-2xl font-bold text-purple-600">
-                          {requirement.totalTubs}
+                      <div className="flex items-center gap-6">
+                        <div className="text-right">
+                          <div className="text-xs text-gray-500">On hand</div>
+                          <div className="text-lg font-semibold text-gray-900">{onHand}</div>
                         </div>
-                        <div className="text-sm text-gray-500">tubs</div>
+                        <div className="text-right">
+                          <div className="text-xs text-gray-500">Needed</div>
+                          <div className="text-lg font-semibold text-purple-700">{requirement.totalTubs}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-gray-500">Shortfall</div>
+                          <div className={`text-lg font-semibold ${shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{shortfall}</div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -280,7 +368,7 @@ export default function ProductionPlanningPage() {
                             }`}></div>
                             <span className="font-medium text-gray-900">{delivery.destination}</span>
                             <span className="text-gray-500">•</span>
-                            <span className="text-gray-600">{delivery.date}</span>
+                            <span className="text-gray-600">{new Date(delivery.date).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
                           </div>
                           <div className="flex items-center space-x-2">
                             <span className="font-medium text-gray-900">{delivery.quantity} tub{delivery.quantity !== 1 ? 's' : ''}</span>
@@ -297,7 +385,8 @@ export default function ProductionPlanningPage() {
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
@@ -305,20 +394,22 @@ export default function ProductionPlanningPage() {
         {/* Inventory Tab */}
         {activeTab === 'inventory' && (
           <div className="bg-white rounded-lg shadow-sm border">
-            <div className="px-6 py-4 border-b border-gray-200">
+      <div className="px-6 py-4 border-b border-gray-200">
               <h3 className="text-lg font-medium text-gray-900">Ingredient Inventory</h3>
               <p className="text-sm text-gray-600 mt-1">
-                Current stock levels across all stores
+        Factory inventory levels
               </p>
             </div>
 
-            {data.inventory.length === 0 ? (
+            {data.inventory.filter((i) => i.category !== 'Gelato Flavors').length === 0 ? (
               <div className="px-6 py-8 text-center text-gray-500">
-                <p>No inventory data available</p>
+                <p>No non-gelato inventory data available</p>
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
-                {data.inventory.map((item) => (
+                {data.inventory
+                  .filter((item) => item.category !== 'Gelato Flavors')
+                  .map((item) => (
                   <div key={item.itemName} className="px-6 py-4 hover:bg-gray-50">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
@@ -336,36 +427,50 @@ export default function ProductionPlanningPage() {
                       </div>
 
                       <div className="flex items-center space-x-6">
-                        <div className="text-right">
-                          <div className="text-lg font-semibold text-gray-900">
-                            {item.totalQuantity.toFixed(1)}
-                          </div>
-                          <div className="text-xs text-gray-500">total units</div>
-                        </div>
-
-                        <div className="text-right">
-                          <div className="text-sm text-gray-600">
-                            Updated {new Date(item.lastUpdated).toLocaleDateString()}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {item.stocktakes.length} store{item.stocktakes.length !== 1 ? 's' : ''}
-                          </div>
-                        </div>
+                        {(() => {
+                          const factoryEntries = item.stocktakes.filter((st) => st.store.toLowerCase().includes('factory'));
+                          const factoryQty = factoryEntries.reduce((sum, st) => sum + (st.quantity || 0), 0);
+                          const latestFactoryDate = factoryEntries.reduce<string | null>((latest, st) => {
+                            const d = new Date(st.date).toISOString();
+                            return !latest || new Date(d) > new Date(latest) ? d : latest;
+                          }, null);
+                          return (
+                            <>
+                              <div className="text-right">
+                                <div className="text-lg font-semibold text-gray-900">
+                                  {factoryQty.toFixed(1)}
+                                </div>
+                                <div className="text-xs text-gray-500">at factory</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm text-gray-600">
+                                  {latestFactoryDate ? `Updated ${new Date(latestFactoryDate).toLocaleDateString()}` : 'No factory stock'}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {factoryEntries.length} entry{factoryEntries.length !== 1 ? 'ies' : ''}
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 
                     {/* Stocktake details */}
                     <div className="mt-3 ml-11">
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                        {item.stocktakes.slice(0, 6).map((stocktake, index) => (
+                        {item.stocktakes
+                          .filter((st) => st.store.toLowerCase().includes('factory'))
+                          .slice(0, 6)
+                          .map((stocktake, index) => (
                           <div key={index} className="text-xs bg-gray-50 rounded px-2 py-1">
                             <span className="font-medium text-gray-700">{stocktake.store}:</span>
                             <span className="ml-1 text-gray-600">{stocktake.quantity.toFixed(1)} ({stocktake.date})</span>
                           </div>
                         ))}
-                        {item.stocktakes.length > 6 && (
+                        {item.stocktakes.filter((st) => st.store.toLowerCase().includes('factory')).length > 6 && (
                           <div className="text-xs text-gray-500 px-2 py-1">
-                            +{item.stocktakes.length - 6} more stores
+                            +{item.stocktakes.filter((st) => st.store.toLowerCase().includes('factory')).length - 6} more entries
                           </div>
                         )}
                       </div>

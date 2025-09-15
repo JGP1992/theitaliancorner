@@ -14,8 +14,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if user has permission to read customers
-    if (!AuthService.hasPermission(user, 'customers:read')) {
+  // Allow access if user can read customers OR has deliveries permissions (for planning UIs)
+  const canReadCustomers = AuthService.hasPermission(user, 'customers:read');
+  const canUseDeliveries = AuthService.hasAnyPermission(user, ['deliveries:read', 'deliveries:create']);
+  if (!canReadCustomers && !canUseDeliveries) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

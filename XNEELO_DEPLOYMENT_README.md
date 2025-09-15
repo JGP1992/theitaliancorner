@@ -46,6 +46,10 @@ npx prisma db push
 
 # Optional: Seed with sample data
 npm run db:seed
+
+# Optional: Seed minimal (no sample data)
+# Prepares roles/permissions/packaging and can create a first admin if FIRST_ADMIN_* env vars are set
+npm run db:seed:minimal
 ```
 
 ## Step 5: Process Management

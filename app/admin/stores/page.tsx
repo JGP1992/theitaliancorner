@@ -1,5 +1,7 @@
 'use client';
 
+import '../../globals.css';
+
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Settings, Package } from 'lucide-react';

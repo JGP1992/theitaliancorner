@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+// Ensure styles load even if a dev tooling hiccup drops the root layout CSS
+import '../globals.css';
 
 type DeliveryItem = {
   quantity: number;
@@ -34,8 +36,14 @@ export default function StaffDeliveriesPage() {
   const fetchTodaysDeliveries = async () => {
     try {
       setLoading(true);
-      const today = new Date().toISOString().slice(0, 10);
-      const response = await fetch(`/api/delivery-plans?status=CONFIRMED&date=${today}`);
+      // Build local date string (YYYY-MM-DD) to avoid UTC off-by-one
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const today = `${yyyy}-${mm}-${dd}`;
+      // Fetch all plans for the day (not just CONFIRMED) so staff can see pending vs completed
+      const response = await fetch(`/api/delivery-plans?date=${today}`, { credentials: 'include', cache: 'no-store' });
       if (!response.ok) {
         throw new Error('Failed to fetch deliveries');
       }
@@ -44,7 +52,7 @@ export default function StaffDeliveriesPage() {
       setDeliveries(todaysDeliveries);
     } catch (err) {
       console.error('Error fetching deliveries:', err);
-      setError('Failed to load today&apos;s deliveries');
+      setError("Failed to load today's deliveries");
     } finally {
       setLoading(false);
     }
@@ -57,6 +65,7 @@ export default function StaffDeliveriesPage() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ status: 'SENT' }),
       });
 
@@ -68,7 +77,8 @@ export default function StaffDeliveriesPage() {
             : delivery
         ));
       } else {
-        alert('Failed to mark as delivered');
+        const data = await response.json().catch(() => null);
+        alert(data?.error || 'Failed to mark as delivered');
       }
     } catch (err) {
       console.error('Error updating delivery:', err);
@@ -119,7 +129,7 @@ export default function StaffDeliveriesPage() {
           <div className="text-center">
             <h1 className="text-4xl font-bold text-gray-900 mb-2">Today&apos;s Deliveries</h1>
             <p className="text-xl text-gray-600">
-              {new Date().toLocaleDateString('en-US', {
+              {new Date().toLocaleDateString(undefined, {
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',
@@ -286,9 +296,7 @@ export default function StaffDeliveriesPage() {
             </div>
             <h3 className="text-2xl font-bold text-gray-900 mb-2">No deliveries today!</h3>
             <p className="text-gray-600 mb-6">You have no deliveries scheduled for today.</p>
-            <div className="text-sm text-gray-500">
-              Enjoy your day off!
-            </div>
+            {/* Intentionally left without extra message per request */}
           </div>
         )}
 

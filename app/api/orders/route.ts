@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../lib/prisma';
 import { AuthService } from '../../../lib/auth';
+import { logAudit } from '../../../lib/audit';
 
 interface OrderItemInput {
   itemId: string;
@@ -119,6 +120,21 @@ export async function POST(request: NextRequest) {
           }
         }
       }
+    });
+
+    // Audit log: order created
+    await logAudit({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'create',
+      resource: 'orders',
+      resourceId: order.id,
+      metadata: {
+        supplierId: supplierId || null,
+        itemsCount: items.length,
+      },
+      ip: request.headers.get('x-forwarded-for') || (request as any).ip || null,
+      userAgent: request.headers.get('user-agent'),
     });
 
     return NextResponse.json(order, { status: 201 });

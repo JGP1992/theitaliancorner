@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# local next logs
+.next-start.log
+
 # production
 /build
 
@@ -46,3 +49,7 @@ next-env.d.ts
 prisma/dev.db
 
 /app/generated/prisma
+
+# editor and local helper files
+.vscode/
+cookies*.txt

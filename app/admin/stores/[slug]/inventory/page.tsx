@@ -1,5 +1,6 @@
 'use client';
 
+import '../../../../globals.css';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Plus, Edit, Trash2, Save, X, Search } from 'lucide-react';
@@ -28,10 +29,12 @@ interface StoreInventoryItem {
 export default function StoreInventoryPage() {
   const params = useParams();
   const router = useRouter();
-  const storeSlug = params.storeId as string;
+  // Dynamic segment is [slug], ensure we read the correct key
+  const storeSlug = params.slug as string;
 
   const [inventory, setInventory] = useState<StoreInventoryItem[]>([]);
   const [availableItems, setAvailableItems] = useState<Item[]>([]);
+  const [stores, setStores] = useState<Array<{ id: string; name: string; slug: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -46,13 +49,14 @@ export default function StoreInventoryPage() {
   const [unit, setUnit] = useState('');
 
   useEffect(() => {
-    fetchInventory();
-    fetchAvailableItems();
+  fetchInventory();
+  fetchAvailableItems();
+  fetchStores();
   }, [storeSlug]);
 
   const fetchInventory = async () => {
     try {
-      const response = await fetch(`/api/stores/${storeSlug}/inventory`);
+  const response = await fetch(`/api/stores/${storeSlug}/inventory`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setInventory(data.inventory);
@@ -66,13 +70,25 @@ export default function StoreInventoryPage() {
 
   const fetchAvailableItems = async () => {
     try {
-      const response = await fetch('/api/items');
+  const response = await fetch('/api/items', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setAvailableItems(data);
       }
     } catch (error) {
       console.error('Failed to fetch items:', error);
+    }
+  };
+
+  const fetchStores = async () => {
+    try {
+      const response = await fetch('/api/stores', { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        setStores(data.stores || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch stores:', error);
     }
   };
 
@@ -84,6 +100,7 @@ export default function StoreInventoryPage() {
       const response = await fetch(`/api/stores/${storeSlug}/inventory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           itemId: selectedItemId,
           targetQuantity: targetQuantity ? parseFloat(targetQuantity) : null,
@@ -112,6 +129,7 @@ export default function StoreInventoryPage() {
       const response = await fetch(`/api/stores/${storeSlug}/inventory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           itemId: editingItem.item.id,
           targetQuantity: targetQuantity ? parseFloat(targetQuantity) : null,
@@ -139,6 +157,7 @@ export default function StoreInventoryPage() {
       const response = await fetch(`/api/stores/${storeSlug}/inventory`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ itemId }),
       });
 
@@ -194,10 +213,22 @@ export default function StoreInventoryPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Store Inventory Management</h1>
               <p className="mt-2 text-gray-600">Configure what items this store should stock and their target quantities</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-600">Store</label>
+              <select
+                value={storeSlug}
+                onChange={(e) => router.push(`/admin/stores/${e.target.value}/inventory`)}
+                className="block w-56 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+              >
+                {stores.map((s) => (
+                  <option key={s.id} value={s.slug}>{s.name}</option>
+                ))}
+              </select>
             </div>
             <button
               onClick={() => setShowAddModal(true)}
@@ -298,7 +329,8 @@ export default function StoreInventoryPage() {
 
         {filteredInventory.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500">No items found in store inventory.</p>
+            <p className="text-gray-500 mb-2">No items configured for this store yet.</p>
+            <p className="text-gray-500">Use the "Add Item" button to add items and targets.</p>
           </div>
         )}
 

@@ -1,42 +1,36 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { AuthService } from './lib/auth';
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public routes that don't require authentication
-  const publicRoutes = ['/login', '/api/auth/login', '/api/auth/status'];
-  const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
-
-  if (isPublicRoute) {
+  // Allow all API routes, static files, and login page
+  if (pathname.startsWith('/api/') ||
+      pathname.startsWith('/_next/') ||
+      pathname === '/favicon.ico' ||
+      pathname === '/first-run' ||
+      pathname.includes('.')) {
     return NextResponse.next();
   }
 
-  // All other routes require authentication
+  // For all other routes, check if user has a valid token
   const token = request.cookies.get('authToken')?.value;
 
-  if (!token) {
-    return NextResponse.redirect(new URL('/login', request.url));
+  // Special handling for the login page: if already authenticated, send to home
+  if (pathname === '/login') {
+  // If no cookie, allow access to login; if cookie exists, send to home
+  if (!token) return NextResponse.next();
+  return NextResponse.redirect(new URL('/', request.url));
   }
 
-  try {
-    const user = AuthService.verifyToken(token);
-    if (!user) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
+  // If no users exist yet, allow accessing first-run
+  // We cannot query DB in middleware, so rely on redirect from /first-run page itself.
+  // If user is unauthenticated and requests /first-run, allow.
+  if (!token && pathname === '/first-run') {
+    return NextResponse.next();
+  }
 
-    // Admin-only routes
-    if (pathname.startsWith('/admin')) {
-      if (!AuthService.hasRole(user, 'admin') && !AuthService.hasRole(user, 'manager')) {
-        return NextResponse.redirect(new URL('/', request.url));
-      }
-    }
-
-    // Manager-only routes (if any specific ones exist)
-    // Add specific manager-only routes here if needed
-
-  } catch (error) {
+  if (!token) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
@@ -47,12 +41,11 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - api/auth (auth endpoints)
+     * - api (API routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public files with extensions
      */
-    '/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.).*)',
+  '/((?!api/|_next/static|_next/image|favicon.ico).*)',
   ],
 };

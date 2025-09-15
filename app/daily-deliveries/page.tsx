@@ -1,9 +1,13 @@
+import '../globals.css';
 import { prisma } from '@/app/lib/prisma';
 import Link from 'next/link';
+import MarkAsSentButton from '@/components/MarkAsSentButton';
 
 type DeliveryItem = {
   quantity: number;
   note?: string | null;
+  weightKg?: number | null;
+  packagingOption?: { name: string } | null;
   item: {
     name: string;
     unit?: string | null;
@@ -27,7 +31,10 @@ type DailyDeliveriesProps = {
 
 export default async function DailyDeliveriesPage({ searchParams }: DailyDeliveriesProps) {
   const params = await searchParams;
-  const selectedDate = params.date ? new Date(params.date) : new Date();
+  // Use YYYY-MM-DD string if provided to avoid timezone drift
+  const selectedDateStr = params.date || undefined;
+  const base = selectedDateStr ? new Date(`${selectedDateStr}T00:00:00`) : new Date();
+  const selectedDate = new Date(base.getFullYear(), base.getMonth(), base.getDate());
 
   // Get deliveries for the selected date
   const deliveries = await prisma.deliveryPlan.findMany({
@@ -42,36 +49,35 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
       customers: {
         include: { customer: true },
       },
-      items: {
+      items: ({
         include: {
-          item: {
-            include: { category: true },
-          },
+          item: { include: { category: true } },
+          packagingOption: true,
         },
-      },
+      } as any),
     },
     orderBy: { createdAt: 'asc' },
-  });
+  }) as any[];
 
   // Group deliveries by destination type
-  const storeDeliveries = deliveries.filter((d: DeliveryPlan) => d.store);
-  const customerDeliveries = deliveries.filter((d: DeliveryPlan) => d.customers.length > 0);
+  const storeDeliveries = (deliveries as any[]).filter((d: any) => d.store);
+  const customerDeliveries = (deliveries as any[]).filter((d: any) => d.customers.length > 0);
 
   // Calculate totals
-  const totalDeliveries = deliveries.length;
-  const confirmedDeliveries = deliveries.filter((d: DeliveryPlan) => d.status === 'CONFIRMED').length;
-  const sentDeliveries = deliveries.filter((d: DeliveryPlan) => d.status === 'SENT').length;
-  const draftDeliveries = deliveries.filter((d: DeliveryPlan) => d.status === 'DRAFT').length;
+  const totalDeliveries = (deliveries as any[]).length;
+  const confirmedDeliveries = (deliveries as any[]).filter((d: any) => d.status === 'CONFIRMED').length;
+  const sentDeliveries = (deliveries as any[]).filter((d: any) => d.status === 'SENT').length;
+  const draftDeliveries = (deliveries as any[]).filter((d: any) => d.status === 'DRAFT').length;
 
   // Calculate item totals by category
-  const itemTotals = deliveries.flatMap((d: DeliveryPlan) => d.items).reduce((acc: Record<string, { total: number; items: Record<string, number> }>, item: DeliveryItem) => {
-    const category = item.item.category?.name || 'No Category';
+  const itemTotals = (deliveries as any[]).flatMap((d: any) => d.items).reduce((acc: Record<string, { total: number; items: Record<string, number> }>, item: any) => {
+    const category = item.item?.category?.name || 'No Category';
     if (!acc[category]) {
       acc[category] = { total: 0, items: {} };
     }
     acc[category].total += item.quantity;
 
-    const itemName = item.item.name;
+    const itemName = item.item?.name || 'Unnamed';
     if (!acc[category].items[itemName]) {
       acc[category].items[itemName] = 0;
     }
@@ -249,7 +255,7 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Store Deliveries</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {storeDeliveries.map((delivery: DeliveryPlan) => (
+              {(storeDeliveries as any[]).map((delivery: any) => (
                 <div key={delivery.id} className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                   <div className="p-6">
                     <div className="flex items-center justify-between mb-4">
@@ -261,13 +267,18 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
                         }`}></div>
                         <h3 className="text-lg font-semibold text-gray-900">{delivery.store?.name}</h3>
                       </div>
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        delivery.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' :
-                        delivery.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {delivery.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          delivery.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' :
+                          delivery.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {delivery.status}
+                        </span>
+                        {delivery.status === 'CONFIRMED' && (
+                          <MarkAsSentButton planId={delivery.id} />
+                        )}
+                      </div>
                     </div>
 
                     {delivery.notes && (
@@ -277,10 +288,13 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
                     )}
 
                     <div className="space-y-2">
-                      {delivery.items.map((item: DeliveryItem, index: number) => (
+                      {(delivery.items as any[]).map((item: any, index: number) => (
                         <div key={index} className="flex items-center justify-between text-sm">
                           <div className="flex-1">
                             <span className="text-gray-900 font-medium">{item.item.name}</span>
+                            {item.packagingOption && (
+                              <span className="text-gray-500 ml-2 text-xs">[{item.packagingOption.name}{item.weightKg ? ` • ${item.weightKg}kg` : ''}]</span>
+                            )}
                             <span className="text-gray-500 ml-2">({item.item.category?.name || 'No Category'})</span>
                             {item.note && (
                               <p className="text-xs text-gray-600 mt-1">{item.note}</p>
@@ -307,7 +321,7 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Customer Deliveries</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {customerDeliveries.map((delivery: DeliveryPlan) => (
+              {(customerDeliveries as any[]).map((delivery: any) => (
                 <div key={delivery.id} className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                   <div className="p-6">
                     <div className="flex items-center justify-between mb-4">
@@ -326,13 +340,18 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
                           </p>
                         </div>
                       </div>
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        delivery.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' :
-                        delivery.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
-                        {delivery.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          delivery.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' :
+                          delivery.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {delivery.status}
+                        </span>
+                        {delivery.status === 'CONFIRMED' && (
+                          <MarkAsSentButton planId={delivery.id} />
+                        )}
+                      </div>
                     </div>
 
                     {delivery.notes && (
@@ -342,10 +361,13 @@ export default async function DailyDeliveriesPage({ searchParams }: DailyDeliver
                     )}
 
                     <div className="space-y-2">
-                      {delivery.items.map((item: DeliveryItem, index: number) => (
+                      {(delivery.items as any[]).map((item: any, index: number) => (
                         <div key={index} className="flex items-center justify-between text-sm">
                           <div className="flex-1">
                             <span className="text-gray-900 font-medium">{item.item.name}</span>
+                            {item.packagingOption && (
+                              <span className="text-gray-500 ml-2 text-xs">[{item.packagingOption.name}{item.weightKg ? ` • ${item.weightKg}kg` : ''}]</span>
+                            )}
                             <span className="text-gray-500 ml-2">({item.item.category?.name || 'No Category'})</span>
                             {item.note && (
                               <p className="text-xs text-gray-600 mt-1">{item.note}</p>

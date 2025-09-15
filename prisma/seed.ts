@@ -167,7 +167,18 @@ const categories: { name: string; items: SeedItem[] }[] = [
 ];
 
 async function main() {
-  console.log('🌱 Starting comprehensive database seeding...');
+  console.log('🌱 Starting database seeding...');
+  const dbUrl = process.env.DATABASE_URL || '';
+  const seedMode = (process.env.SEED_MODE || '').toLowerCase();
+  const isMinimal = seedMode === 'minimal' || (process.env.CLEAN_SEED || '').toLowerCase() === 'true';
+  const LIGHT_SEED = !isMinimal && ((process.env.LIGHT_SEED || '').toLowerCase() === 'true' || dbUrl.includes('db.prisma.io'));
+  if (isMinimal) {
+    console.log('⚙️ Using MINIMAL seed mode (no sample data)');
+  } else if (LIGHT_SEED) {
+    console.log('⚙️ Using LIGHT_SEED mode (reduced volumes)');
+  } else {
+    console.log('⚙️ Using FULL seed mode');
+  }
 
   // Create permissions first
   console.log('🔐 Creating permissions...');
@@ -204,6 +215,12 @@ async function main() {
     { name: 'recipes:create', resource: 'recipes', action: 'create', description: 'Create recipes' },
     { name: 'recipes:update', resource: 'recipes', action: 'update', description: 'Update recipes' },
     { name: 'recipes:delete', resource: 'recipes', action: 'delete', description: 'Delete recipes' },
+
+  // Customer permissions
+  { name: 'customers:read', resource: 'customers', action: 'read', description: 'View customers' },
+  { name: 'customers:create', resource: 'customers', action: 'create', description: 'Create customers' },
+  { name: 'customers:update', resource: 'customers', action: 'update', description: 'Update customers' },
+  { name: 'customers:delete', resource: 'customers', action: 'delete', description: 'Delete customers' },
 
     // User management permissions
     { name: 'users:read', resource: 'users', action: 'read', description: 'View users' },
@@ -243,7 +260,8 @@ async function main() {
         'deliveries:read', 'deliveries:create', 'deliveries:update',
         'production:read', 'production:create', 'production:update',
         'orders:read', 'orders:create', 'orders:update',
-        'recipes:read', 'recipes:create', 'recipes:update',
+  'recipes:read', 'recipes:create', 'recipes:update',
+  'customers:read', 'customers:create', 'customers:update',
         'users:read',
       ],
     },
@@ -275,6 +293,7 @@ async function main() {
         'production:read',
         'orders:read',
         'recipes:read',
+  'customers:read',
         'users:read',
       ],
     },
@@ -312,25 +331,53 @@ async function main() {
       }
     }
   }
-
-  // Create default admin user
-  console.log('👤 Creating default admin user...');
+  // Optionally create a first admin user from env in minimal or full mode
   const adminRole = await prisma.role.findUnique({ where: { name: 'admin' } });
-  if (adminRole) {
-    const existingAdmin = await prisma.user.findUnique({
-      where: { email: 'admin@stocktake.com' },
-    });
-
-    if (!existingAdmin) {
+  const envFirstAdminEmail = (process.env.FIRST_ADMIN_EMAIL || '').trim();
+  const envFirstAdminPassword = (process.env.FIRST_ADMIN_PASSWORD || '').trim();
+  const envFirstAdminFirst = (process.env.FIRST_ADMIN_FIRSTNAME || 'System').trim();
+  const envFirstAdminLast = (process.env.FIRST_ADMIN_LASTNAME || 'Administrator').trim();
+  if (adminRole && envFirstAdminEmail && envFirstAdminPassword) {
+    const existingEnvAdmin = await prisma.user.findUnique({ where: { email: envFirstAdminEmail } });
+    if (!existingEnvAdmin) {
       await AuthService.createUser(
-        'admin@stocktake.com',
-        'admin123',
-        'System',
-        'Administrator',
+        envFirstAdminEmail,
+        envFirstAdminPassword,
+        envFirstAdminFirst,
+        envFirstAdminLast,
         [adminRole.id]
       );
-      console.log('✅ Created default admin user: admin@stocktake.com / admin123');
+      console.log(`✅ Created FIRST_ADMIN user from env: ${envFirstAdminEmail}`);
+    } else {
+      console.log(`ℹ️ FIRST_ADMIN_EMAIL already exists: ${envFirstAdminEmail}`);
     }
+  }
+
+  // Seed packaging options
+  console.log('📦 Creating packaging options...');
+  const packagingOptions = [
+    // Customer-facing options (restaurants/cafes/hotels)
+    { name: '125 ml cup', type: 'CUP', sizeValue: 125, sizeUnit: 'ML', variableWeight: false, sortOrder: 1, allowStores: false, allowCustomers: true },
+    { name: '2 L tub', type: 'TUB', sizeValue: 2, sizeUnit: 'L', variableWeight: false, sortOrder: 2, allowStores: false, allowCustomers: true },
+    { name: '5 L tub', type: 'TUB', sizeValue: 5, sizeUnit: 'L', variableWeight: false, sortOrder: 3, allowStores: true, allowCustomers: true },  { name: '2.5 kg tray', type: 'TRAY', sizeValue: 2.5, sizeUnit: 'KG', variableWeight: true, sortOrder: 4, allowStores: true, allowCustomers: true },
+    // Shop-facing (store) trays; variable weights allowed
+    { name: '5 L tray', type: 'TRAY', sizeValue: 5, sizeUnit: 'L', variableWeight: true, sortOrder: 5, allowStores: true, allowCustomers: false },
+  ];
+  for (const p of packagingOptions) {
+    // @ts-ignore - client may not have new model before generate
+    await (prisma as any).packagingOption.upsert({
+      where: { name: p.name },
+      update: { type: p.type, sizeValue: p.sizeValue, sizeUnit: p.sizeUnit, variableWeight: p.variableWeight, sortOrder: p.sortOrder, isActive: true, allowStores: (p as any).allowStores ?? true, allowCustomers: (p as any).allowCustomers ?? true },
+      create: { ...p, isActive: true },
+    });
+  }
+
+  // In minimal mode, stop here — no demo entities, stores, customers, items, or sample records
+  if (isMinimal) {
+    console.log('🧹 Minimal seed complete: roles/permissions, packaging options, and optional FIRST_ADMIN only.');
+    console.log('❌ Skipping creation of demo stores, customers, items, stocktakes, deliveries, suppliers, and recipes.');
+    console.log('✅ Minimal seeding completed successfully!');
+    return;
   }
 
   // Create default manager user
@@ -353,6 +400,7 @@ async function main() {
     }
   }
   const stores = [
+    { name: 'Factory', slug: 'factory', apiKey: 'store_factory_dev_key' },
     { name: 'Florenci', slug: 'florenci', apiKey: 'store_florenci_dev_key' },
     { name: 'Figtree Store', slug: 'figtree-store', apiKey: 'store_figtree_dev_key' },
     { name: 'CBD Store', slug: 'cbd-store', apiKey: 'store_cbd_dev_key' },
@@ -434,29 +482,33 @@ async function main() {
     }
   }
 
-  // Create sample stocktakes for the last 30 days
+  // Create sample stocktakes for the last 30 days (reduced if LIGHT_SEED)
   console.log('📊 Creating sample stocktakes...');
   const allStores = await prisma.store.findMany();
+  const adminUser = await prisma.user.findFirst({ where: { email: 'admin@stocktake.com' } });
   const allItems = await prisma.item.findMany({
     include: { category: true }
   });
 
-  for (let i = 0; i < 30; i++) {
+  const stocktakeDays = LIGHT_SEED ? 7 : 30;
+  for (let i = 0; i < stocktakeDays; i++) {
     const date = new Date();
     date.setDate(date.getDate() - i);
 
     // Create stocktakes for random stores
-    const storesToStocktake = allStores.filter(() => Math.random() > 0.7); // 30% chance per store
+  const storesToStocktake = allStores.filter(() => Math.random() > (LIGHT_SEED ? 0.85 : 0.7)); // fewer in light mode
 
     for (const store of storesToStocktake) {
-      const stocktake = await prisma.stocktake.create({
-        data: {
+  if (LIGHT_SEED) await new Promise(r => setTimeout(r, 10));
+  const stocktake = await prisma.stocktake.create({
+        data: ({
           storeId: store.id,
           date: date,
           submittedAt: new Date(date.getTime() + Math.random() * 8 * 60 * 60 * 1000), // Random time during the day
+          ...(adminUser ? { submittedByUserId: adminUser.id } : {}),
           items: {
             create: allItems
-              .filter(() => Math.random() > 0.3) // 70% chance of including each item
+              .filter(() => Math.random() > (LIGHT_SEED ? 0.6 : 0.3)) // fewer items in light mode
               .map((item: any) => ({
                 itemId: item.id,
                 quantity: item.category.name === 'Gelato Flavors'
@@ -464,19 +516,20 @@ async function main() {
                   : Math.floor(Math.random() * 10) + 1, // 1-10 for other items
               }))
           }
-        }
+        }) as any
       });
     }
   }
 
-  // Create sample delivery plans
+  // Create sample delivery plans (past week) and some upcoming (next two weeks)
   console.log('🚚 Creating sample delivery plans...');
   const allCustomers = await prisma.customer.findMany();
   const gelatoItems = await prisma.item.findMany({
     where: { category: { name: 'Gelato Flavors' } }
   });
 
-  for (let i = 0; i < 15; i++) {
+  const pastDeliveryCount = LIGHT_SEED ? 8 : 15;
+  for (let i = 0; i < pastDeliveryCount; i++) {
     const date = new Date();
     date.setDate(date.getDate() - Math.floor(Math.random() * 7)); // Last 7 days
 
@@ -509,9 +562,62 @@ async function main() {
       };
     }
 
-    await prisma.deliveryPlan.create({
-      data: deliveryPlanData
-    });
+  // Simple retry to avoid transient DB disconnects during heavy seed
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+    if (LIGHT_SEED) await new Promise(r => setTimeout(r, 25));
+        await prisma.deliveryPlan.create({ data: deliveryPlanData });
+        break;
+      } catch (err: any) {
+        if (attempt === 3) throw err;
+        await new Promise(r => setTimeout(r, 250 * attempt));
+      }
+    }
+  }
+
+  // Upcoming deliveries (next 14 days) to ensure production planning/analytics have data
+  const futureDeliveryCount = LIGHT_SEED ? 6 : 12;
+  for (let i = 0; i < futureDeliveryCount; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() + Math.floor(Math.random() * 14) + 1); // Next 1-14 days
+
+    const isStoreDelivery = Math.random() > 0.6;
+    let deliveryPlanData: any = {
+      date: date,
+      status: ['DRAFT', 'CONFIRMED'][Math.floor(Math.random() * 2)] as 'DRAFT' | 'CONFIRMED',
+      items: {
+        create: gelatoItems
+          .filter(() => Math.random() > 0.4)
+          .slice(0, Math.floor(Math.random() * 5) + 1)
+          .map((item: any) => ({
+            itemId: item.id,
+            quantity: Math.floor(Math.random() * 3) + 1,
+          }))
+      }
+    };
+
+    if (isStoreDelivery) {
+      deliveryPlanData.storeId = allStores[Math.floor(Math.random() * allStores.length)].id;
+    } else {
+      const customer = allCustomers[Math.floor(Math.random() * allCustomers.length)];
+      deliveryPlanData.customers = {
+        create: {
+          customerId: customer.id,
+          priority: Math.floor(Math.random() * 5) + 1,
+        }
+      };
+    }
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        if (LIGHT_SEED) await new Promise(r => setTimeout(r, 25));
+        await prisma.deliveryPlan.create({ data: deliveryPlanData });
+        break;
+      } catch (err: any) {
+        if (attempt === 3) throw err;
+        await new Promise(r => setTimeout(r, 250 * attempt));
+      }
+    }
   }
 
   // Create sample suppliers
@@ -531,6 +637,7 @@ async function main() {
       create: supplierData,
     });
   }
+
 
   // Create sample recipes
   console.log('👨‍🍳 Creating recipes...');

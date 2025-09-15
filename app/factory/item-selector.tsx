@@ -8,6 +8,7 @@ type Item = {
   category: string;
   unit?: string;
   targetNumber?: number;
+  defaultQuantity?: number;
 };
 
 type SelectedItem = {
@@ -15,12 +16,16 @@ type SelectedItem = {
   name: string;
   quantity: number;
   unit?: string;
+  packagingOptionId?: string;
+  weightKg?: number;
 };
 
 interface ItemSelectorProps {
   selectedItems: SelectedItem[];
   onItemsChange: (items: SelectedItem[]) => void;
   destinationName: string;
+  destinationType?: 'store' | 'customer';
+  showPackaging?: boolean; // when false, hide packaging UI and skip packaging fetches
 }
 
 type CategoryResponse = {
@@ -33,28 +38,61 @@ type CategoryResponse = {
   }[];
 };
 
-function ItemSelector({ selectedItems, onItemsChange, destinationName }: ItemSelectorProps) {
+function ItemSelector({ selectedItems, onItemsChange, destinationName, destinationType = 'store', showPackaging = true }: ItemSelectorProps) {
   const [availableItems, setAvailableItems] = useState<Item[]>([]);
+  const [packagingOptions, setPackagingOptions] = useState<Array<{ id: string; name: string; type: string; sizeValue: number | null; sizeUnit: string | null; variableWeight: boolean }>>([]);
+  const packagingCache = useRef<Record<string, Array<{ id: string; name: string; type: string; sizeValue: number | null; sizeUnit: string | null; variableWeight: boolean }>>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const fetchItems = async () => {
+  const fetchItems = async () => {
       try {
-        const response = await fetch('/api/items');
-        const data: CategoryResponse[] = await response.json();
-        const flattenedItems = data.flatMap((category: CategoryResponse) =>
-          category.items.map((item) => ({
-            id: item.id,
-            name: item.name,
-            category: category.name,
-            unit: item.unit,
-            targetNumber: item.targetNumber
-          }))
-        );
-        setAvailableItems(flattenedItems);
+        const response = await fetch('/api/items', { credentials: 'include' });
+        const raw = await response.json();
+
+        let flattenedItems: Item[] = [];
+
+        // Shape 1: Category array with nested items
+        if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'object' && 'items' in raw[0]) {
+          const data = raw as CategoryResponse[];
+          flattenedItems = data.flatMap((category) =>
+            (category.items || []).map((item) => ({
+              id: item.id,
+              name: item.name,
+              category: category.name,
+              unit: item.unit,
+              targetNumber: item.targetNumber,
+              defaultQuantity: (item as any).defaultQuantity
+            }))
+          );
+        }
+
+        // Shape 2: Flat items array with optional category object
+        if (Array.isArray(raw) && (flattenedItems.length === 0)) {
+          flattenedItems = (raw as Array<any>).map((it) => ({
+            id: String(it.id),
+            name: String(it.name),
+            category: (it.category && it.category.name) ? String(it.category.name) : 'Uncategorized',
+            unit: it.unit ? String(it.unit) : undefined,
+            targetNumber: typeof it.targetNumber === 'number' ? it.targetNumber : undefined,
+            defaultQuantity: typeof it.defaultQuantity === 'number' ? it.defaultQuantity : undefined,
+          }));
+        }
+
+        setAvailableItems(flattenedItems || []);
+        // Optionally fetch global packaging options (fallback list)
+        if (showPackaging) {
+          try {
+            const pRes = await fetch(`/api/packaging-options${destinationType ? `?audience=${destinationType}` : ''}` as string, { credentials: 'include' });
+            if (pRes.ok) {
+              const opts = await pRes.json();
+              setPackagingOptions(opts || []);
+            }
+          } catch {}
+        }
       } catch (error) {
         console.error('Failed to fetch items:', error);
       } finally {
@@ -63,7 +101,7 @@ function ItemSelector({ selectedItems, onItemsChange, destinationName }: ItemSel
     };
 
     fetchItems();
-  }, []);
+  }, [destinationType, showPackaging]);
 
   const filteredItems = availableItems.filter(item =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -75,10 +113,38 @@ function ItemSelector({ selectedItems, onItemsChange, destinationName }: ItemSel
       const newItem: SelectedItem = {
         id: item.id,
         name: item.name,
-        quantity: item.targetNumber || 1,
+        // Default to 1 for deliveries; ignore targetNumber to avoid confusion
+        quantity: (typeof item.defaultQuantity === 'number' && item.defaultQuantity > 0) ? item.defaultQuantity : 1,
         unit: item.unit
       };
       onItemsChange([...selectedItems, newItem]);
+      // Optionally preload packaging for this item if gelato, to make selection smooth
+      const isGelato = typeof item.category === 'string' && item.category.toLowerCase().includes('gelato');
+      if (showPackaging && isGelato && !packagingCache.current[item.id]) {
+        const query = new URLSearchParams();
+        if (destinationType) query.set('audience', destinationType);
+        query.set('itemId', item.id);
+        const baseline = [...selectedItems, newItem];
+        fetch(`/api/packaging-options?${query.toString()}`, { credentials: 'include' })
+          .then((r) => r.ok ? r.json() : [])
+          .then((opts: Array<any>) => {
+            packagingCache.current[item.id] = opts || [];
+            // If there is a default packaging, auto-select it for this item
+            let defaultOpt: any = undefined;
+            if (destinationType === 'store') {
+              defaultOpt = (opts || []).find((o) => o.isDefaultForStores) || (opts || []).find((o) => o.isDefault);
+            } else if (destinationType === 'customer') {
+              defaultOpt = (opts || []).find((o) => o.isDefaultForCustomers) || (opts || []).find((o) => o.isDefault);
+            } else {
+              defaultOpt = (opts || []).find((o) => o.isDefault);
+            }
+            if (defaultOpt) {
+              const updated = baseline.map((si) => si.id === item.id ? { ...si, packagingOptionId: defaultOpt.id } : si);
+              onItemsChange(updated);
+            }
+          })
+          .catch(() => {});
+      }
     }
     setSearchTerm('');
     setShowDropdown(false);
@@ -92,6 +158,18 @@ function ItemSelector({ selectedItems, onItemsChange, destinationName }: ItemSel
   const updateQuantity = (itemId: string, quantity: number) => {
     onItemsChange(selectedItems.map(item =>
       item.id === itemId ? { ...item, quantity: Math.max(0, quantity) } : item
+    ));
+  };
+
+  const updatePackaging = (itemId: string, packagingOptionId: string) => {
+    onItemsChange(selectedItems.map(item =>
+      item.id === itemId ? { ...item, packagingOptionId, weightKg: undefined } : item
+    ));
+  };
+
+  const updateWeight = (itemId: string, weightKg: number) => {
+    onItemsChange(selectedItems.map(item =>
+      item.id === itemId ? { ...item, weightKg: weightKg > 0 ? weightKg : undefined } : item
     ));
   };
 
@@ -199,27 +277,101 @@ function ItemSelector({ selectedItems, onItemsChange, destinationName }: ItemSel
         <div className="space-y-2">
           <h5 className="text-sm font-medium text-gray-700">Selected Items:</h5>
           <div className="space-y-2 max-h-60 overflow-y-auto">
-            {selectedItems.map((item) => (
-              <div key={item.id} className="flex items-center justify-between bg-gray-50 rounded-md p-3">
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-gray-900">{item.name}</span>
-                  {item.unit && (
-                    <span className="text-xs text-gray-500 ml-2">({item.unit})</span>
+            {selectedItems.map((item) => {
+              const itemMeta = availableItems.find(ai => ai.id === item.id);
+              const isGelato = !!itemMeta && typeof itemMeta.category === 'string' && itemMeta.category.toLowerCase().includes('gelato');
+              const itemPackaging = (showPackaging ? (packagingCache.current[item.id] || packagingOptions) : []);
+              const selectedPackaging = itemPackaging.find(po => po.id === item.packagingOptionId) || packagingOptions.find(po => po.id === item.packagingOptionId);
+              const formatPackLabel = (p?: { type: string; sizeValue: number | null; sizeUnit: string | null; name: string }) => {
+                if (!p) return '';
+                const unitRaw = (p.sizeUnit || '').toLowerCase();
+                const unit = unitRaw === 'ml' ? 'ml' : unitRaw === 'l' ? 'L' : unitRaw === 'kg' ? 'kg' : unitRaw;
+                const size = p.sizeValue != null ? `${p.sizeValue}${unit ? unit : ''}` : '';
+                const type = p.type ? p.type.charAt(0) + p.type.slice(1).toLowerCase() : '';
+                return size ? `${size} ${type}` : (type || p.name);
+              };
+              return (
+              <div key={item.id} className="flex items-start justify-between bg-gray-50 rounded-md p-3">
+                <div className="flex-1 min-w-0 pr-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900 truncate">{item.name}</span>
+                  </div>
+                  {/* Packaging and optional weight */}
+                  {showPackaging && isGelato && (itemPackaging.length > 0) && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <select
+                        value={item.packagingOptionId || ''}
+                        onChange={(e) => updatePackaging(item.id, e.target.value || '')}
+                        className="border border-gray-300 rounded px-2 py-1 text-xs"
+                      >
+                        <option value="">Select packaging</option>
+                        {itemPackaging.map((p) => {
+                          // Build clean label like: "Tub 5L", "Tray 2.5kg", "Cup 125ml"
+                          const unitRaw = (p.sizeUnit || '').toLowerCase();
+                          const unit = unitRaw === 'ml' ? 'ml' : unitRaw === 'l' ? 'L' : unitRaw === 'kg' ? 'kg' : unitRaw;
+                          const size = p.sizeValue != null ? `${p.sizeValue}${unit ? unit : ''}` : '';
+                          const type = p.type ? p.type.charAt(0) + p.type.slice(1).toLowerCase() : '';
+                          const label = size ? `${type || p.name} ${size}` : (type || p.name);
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {(() => {
+                        const p = selectedPackaging;
+                        const needsWeight = Boolean(p?.variableWeight);
+                        // Weight can be captured later during loading; don't hard-block here
+                        if (needsWeight) {
+                          return (
+                            <div className="flex flex-col">
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                step="0.01"
+                                min="0.01"
+                                value={item.weightKg ?? ''}
+                                onChange={(e) => updateWeight(item.id, parseFloat(e.target.value) || 0)}
+                                placeholder="Weight per unit (kg)"
+                                className="w-28 border border-gray-300 rounded px-2 py-1 text-xs"
+                              />
+                              <span className="text-[11px] text-gray-500 mt-1">Optional now • required before dispatch</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
                   )}
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex flex-col items-end space-y-1">
+                  <div className="text-[11px] text-gray-600 self-start">
+                    Qty{selectedPackaging ? ` (${formatPackLabel(selectedPackaging)})` : (itemMeta?.unit ? ` (${itemMeta.unit})` : '')}
+                  </div>
                   <input
                     type="number"
+                    inputMode="decimal"
                     min="0"
-                    step="0.1"
-                    value={item.quantity}
+                    step={selectedPackaging ? 1 : 'any'}
+                    value={Number.isFinite(item.quantity) ? item.quantity : ''}
                     onChange={(e) => {
                       e.preventDefault();
-                      updateQuantity(item.id, parseFloat(e.target.value) || 0);
+                      const val = e.currentTarget.value;
+                      let num = val === '' ? NaN : Number(val);
+                      if (!Number.isFinite(num)) num = 0;
+                      // For packaged items (tubs/trays/cups), normalize to whole units
+                      if (selectedPackaging) {
+                        num = Math.max(0, Math.floor(num));
+                      }
+                      updateQuantity(item.id, num);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-28 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
+                  {(!(typeof item.quantity === 'number' && item.quantity > 0)) && (
+                    <span className="text-[11px] text-red-600">Qty must be greater than 0.</span>
+                  )}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -236,7 +388,7 @@ function ItemSelector({ selectedItems, onItemsChange, destinationName }: ItemSel
                   </button>
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         </div>
       )}

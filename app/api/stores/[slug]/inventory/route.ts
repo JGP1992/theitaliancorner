@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../../../app/lib/prisma';
+import { prisma } from '../../../../lib/prisma';
 import { AuthService } from '../../../../../lib/auth';
+import { logAudit } from '../../../../../lib/audit';
 
 export async function GET(
   req: NextRequest,
@@ -141,6 +142,18 @@ export async function POST(
       },
     });
 
+    // Audit: add/update inventory mapping
+    await logAudit({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'upsert',
+      resource: 'storeInventory',
+      resourceId: inventoryItem.id,
+      metadata: { storeSlug: slug, itemId, targetQuantity, targetText, unit },
+      ip: req.headers.get('x-forwarded-for') || (req as any).ip || null,
+      userAgent: req.headers.get('user-agent'),
+    });
+
     return NextResponse.json({ inventoryItem });
   } catch (error) {
     console.error('Error updating store inventory:', error);
@@ -200,6 +213,18 @@ export async function DELETE(
         isActive: false,
         updatedAt: new Date(),
       },
+    });
+
+    // Audit: delete inventory mapping (soft)
+    await logAudit({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'delete',
+      resource: 'storeInventory',
+      resourceId: itemId,
+      metadata: { storeSlug: slug },
+      ip: req.headers.get('x-forwarded-for') || (req as any).ip || null,
+      userAgent: req.headers.get('user-agent'),
     });
 
     return NextResponse.json({ success: true });

@@ -1,268 +1,155 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../lib/prisma';
-import { AuthService } from '../../../lib/auth';
+import { prisma } from '@/app/lib/prisma';
+import { AuthService } from '@/lib/auth';
 
-interface ProductionRequirement {
-  flavorName: string;
-  totalTubs: number;
-  deliveries: Array<{
-    date: string;
-    destination: string;
-    quantity: number;
-    status: string;
-  }>;
-}
-
-interface InventoryLevel {
-  itemName: string;
-  category: string;
-  totalQuantity: number;
-  lastUpdated: string;
-  stocktakes: Array<{
-    store: string;
-    quantity: number;
-    date: string;
-  }>;
-}
-
-interface FlavorRequirements {
-  [key: string]: ProductionRequirement;
-}
-
-interface InventoryLevels {
-  [key: string]: InventoryLevel;
-}
-
-interface StocktakeItemWithItem {
-  itemId: string;
-  quantity: number | null;
-  item: {
-    name: string;
-    category: {
-      name: string;
-    } | null;
-  };
-}
-
-interface StocktakeWithIncludes {
-  submittedAt: Date;
-  store: {
-    name: string;
-  };
-  items: StocktakeItemWithItem[];
-}
-
-interface DeliveryItemWithItem {
-  item: {
-    name: string;
-    category: {
-      name: string;
-    } | null;
-  };
-  quantity: number;
-}
-
-interface DeliveryPlanCustomerWithCustomer {
-  customer: {
-    name: string;
-  };
-}
-
-interface DeliveryPlanWithIncludes {
-  date: Date;
-  status: string;
-  store: {
-    name: string;
-  } | null;
-  items: DeliveryItemWithItem[];
-  customers: DeliveryPlanCustomerWithCustomer[];
-}
-
-export async function GET(req: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const token = req.cookies.get('authToken')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
+    // Auth
+    const token = request.cookies.get('authToken')?.value;
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = AuthService.verifyToken(token);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if user has permission to read production plans
-    if (!AuthService.hasPermission(user, 'productions:read')) {
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!AuthService.hasPermission(user, 'production:read')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const days = parseInt(searchParams.get('days') || '7');
+    const { searchParams } = new URL(request.url);
+    const days = Math.max(1, Math.min(60, parseInt(searchParams.get('days') || '7', 10) || 7));
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + days);
+    end.setHours(23, 59, 59, 999);
 
-    // Calculate date range
-    const startDate = new Date();
-    startDate.setHours(0, 0, 0, 0);
-
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() + days);
-    endDate.setHours(23, 59, 59, 999);
-
-    // Get all confirmed and draft delivery plans within the date range
-    const deliveryPlans = await prisma.deliveryPlan.findMany({
-      where: {
-        date: {
-          gte: startDate,
-          lte: endDate
-        },
-        status: {
-          in: ['CONFIRMED', 'DRAFT']
-        }
-      },
-      include: {
-        items: {
-          include: {
-            item: {
-              include: {
-                category: true
-              }
-            }
-          }
-        },
-        store: true,
-        customers: {
-          include: {
-            customer: true
-          }
-        }
-      },
-      orderBy: {
-        date: 'asc'
-      }
-    });
-
-    // Calculate production requirements by flavor
-    const flavorRequirements: FlavorRequirements = {};
-
-    // Get latest stocktakes for inventory levels
-    const latestStocktakes = await prisma.stocktake.findMany({
-      orderBy: { submittedAt: 'desc' },
-      take: 10, // Get recent stocktakes
+    // Fetch delivery plans in range
+    const plans = await prisma.deliveryPlan.findMany({
+      where: { date: { gte: start, lte: end } },
       include: {
         store: true,
+        customers: { include: { customer: true } },
         items: {
           include: {
-            item: {
-              include: {
-                category: true
-              }
-            }
-          }
+            item: { include: { category: true } },
+            packagingOption: true,
+          },
+        },
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    // Build production requirements from Gelato Flavors
+    type Prod = {
+      flavorName: string;
+      totalTubs: number;
+      deliveries: Array<{ date: string; destination: string; quantity: number; status: string }>; 
+    };
+    const prodMap = new Map<string, Prod>();
+    for (const p of plans) {
+      const destination = p.store?.name || p.customers.map((pc) => pc.customer.name).join(', ') || 'Unknown';
+      for (const it of p.items) {
+        const cat = it.item.category?.name || '';
+        if (cat !== 'Gelato Flavors') continue;
+        // Count quantity as tubs to produce; packaging may vary but quantity is in tubs in this domain
+        const key = it.item.name;
+        if (!prodMap.has(key)) {
+          prodMap.set(key, { flavorName: key, totalTubs: 0, deliveries: [] });
         }
+        const rec = prodMap.get(key)!;
+        rec.totalTubs += it.quantity;
+        rec.deliveries.push({
+          date: p.date.toISOString(),
+          destination,
+          quantity: it.quantity,
+          status: p.status,
+        });
       }
-    });
+    }
+    const productionPlan = Array.from(prodMap.values()).sort((a, b) => a.flavorName.localeCompare(b.flavorName));
 
-    // Calculate current inventory levels
-    const inventoryLevels: InventoryLevels = {};
-
-    // Process stocktakes for inventory
-    latestStocktakes.forEach((stocktake: StocktakeWithIncludes) => {
-      stocktake.items.forEach((stocktakeItem: StocktakeItemWithItem) => {
-        const itemId = stocktakeItem.itemId;
-        const itemName = stocktakeItem.item.name;
-        const category = stocktakeItem.item.category?.name || 'Unknown';
-
-        if (!inventoryLevels[itemId]) {
-          inventoryLevels[itemId] = {
-            itemName,
-            category,
-            totalQuantity: 0,
-            lastUpdated: stocktake.submittedAt.toISOString(),
-            stocktakes: []
-          };
-        }
-
-        if (stocktakeItem.quantity) {
-          inventoryLevels[itemId].stocktakes.push({
-            store: stocktake.store.name,
-            quantity: stocktakeItem.quantity,
-            date: stocktake.submittedAt.toISOString().split('T')[0]
-          });
-
-          // Update total quantity (sum across stores)
-          inventoryLevels[itemId].totalQuantity += stocktakeItem.quantity;
-
-          // Update last updated if this is more recent
-          if (new Date(stocktake.submittedAt) > new Date(inventoryLevels[itemId].lastUpdated)) {
-            inventoryLevels[itemId].lastUpdated = stocktake.submittedAt.toISOString();
-          }
-        }
+    // Inventory snapshot: use the latest stocktake per store and sum across stores
+    const stores = await prisma.store.findMany();
+    // Fetch latest stocktake with items for each store, but for Factory prefer the latest master stocktake if available
+    const latestByStore: Array<{
+      store: { id: string; name: string };
+      date: Date;
+      items: Array<{ item: { id: string; name: string; category: { name: string } }; quantity: number | null }>;
+    }> = [];
+    for (const s of stores) {
+      // Try master stocktake first for Factory
+      let st = await prisma.stocktake.findFirst({
+        where: { storeId: s.id, ...(s.slug === 'factory' ? { isMaster: true as any } : {}) },
+        orderBy: { date: 'desc' },
+        include: { items: { include: { item: { include: { category: true } } } } },
       });
-    });
+      if (!st) {
+        st = await prisma.stocktake.findFirst({
+          where: { storeId: s.id },
+          orderBy: { date: 'desc' },
+          include: { items: { include: { item: { include: { category: true } } } } },
+        });
+      }
+      if (st) {
+        latestByStore.push({ store: { id: s.id, name: s.name }, date: st.date, items: st.items.map((i) => ({ item: i.item as any, quantity: i.quantity })) });
+      }
+    }
 
-    // Process delivery plans for production requirements
-    deliveryPlans.forEach((plan: DeliveryPlanWithIncludes) => {
-      plan.items.forEach((deliveryItem: DeliveryItemWithItem) => {
-        const item = deliveryItem.item;
-        const category = item.category?.name;
-
-        // Only process gelato flavors
-        if (category === 'Gelato Flavors') {
-          const flavorName = item.name;
-
-          if (!flavorRequirements[flavorName]) {
-            flavorRequirements[flavorName] = {
-              flavorName,
-              totalTubs: 0,
-              deliveries: []
-            };
-          }
-
-          const destination = plan.store?.name ||
-            (plan.customers.length > 0
-              ? plan.customers.map((pc: DeliveryPlanCustomerWithCustomer) => pc.customer.name).join(', ')
-              : 'Unknown');
-
-          flavorRequirements[flavorName].totalTubs += deliveryItem.quantity;
-          flavorRequirements[flavorName].deliveries.push({
-            date: plan.date.toISOString().split('T')[0],
-            destination,
-            quantity: deliveryItem.quantity,
-            status: plan.status
-          });
+    type Inv = {
+      itemName: string;
+      category: string;
+      totalQuantity: number;
+      lastUpdated: string;
+      stocktakes: Array<{ store: string; quantity: number; date: string }>;
+      // Optional thresholds if available in store inventory config
+      targetThreshold?: number;
+    };
+    const invMap = new Map<string, Inv>();
+    for (const entry of latestByStore) {
+      for (const si of entry.items) {
+        if (si.quantity == null) continue;
+        const name = si.item.name;
+        const cat = si.item.category?.name || 'Unknown';
+        if (!invMap.has(name)) {
+          invMap.set(name, { itemName: name, category: cat, totalQuantity: 0, lastUpdated: entry.date.toISOString(), stocktakes: [] });
         }
-      });
-    });
+        const rec = invMap.get(name)!;
+        rec.totalQuantity += si.quantity || 0;
+        // Update lastUpdated if newer
+        if (new Date(rec.lastUpdated) < entry.date) rec.lastUpdated = entry.date.toISOString();
+        rec.stocktakes.push({ store: entry.store.name, quantity: si.quantity || 0, date: entry.date.toISOString().slice(0, 10) });
+      }
+    }
 
-    // Sort deliveries by date for each flavor
-    Object.values(flavorRequirements).forEach(requirement => {
-      requirement.deliveries.sort((a, b) => a.date.localeCompare(b.date));
-    });
+    // Attach optional thresholds from store inventory settings if present
+    const allStoreInventory = await prisma.storeInventory.findMany({ include: { item: true, store: true } });
+    const thresholdByItem: Record<string, number | undefined> = {};
+    for (const inv of allStoreInventory) {
+      if (typeof inv.targetQuantity === 'number') {
+        const name = inv.item.name;
+        thresholdByItem[name] = Math.max(thresholdByItem[name] || 0, inv.targetQuantity);
+      }
+    }
+    for (const [name, rec] of invMap.entries()) {
+      if (thresholdByItem[name] != null) {
+        (rec as any).targetThreshold = thresholdByItem[name];
+      }
+    }
 
-    // Convert to arrays and sort by total tubs needed
-    const productionPlan = Object.values(flavorRequirements)
-      .sort((a, b) => b.totalTubs - a.totalTubs);
+    const inventory = Array.from(invMap.values()).sort((a, b) => a.itemName.localeCompare(b.itemName));
 
-    const inventory = Object.values(inventoryLevels)
-      .sort((a, b) => a.category.localeCompare(b.category));
+    const summary = {
+      totalFlavors: productionPlan.length,
+      totalTubs: productionPlan.reduce((s, r) => s + r.totalTubs, 0),
+      upcomingDeliveries: plans.length,
+    };
 
     return NextResponse.json({
       productionPlan,
       inventory,
-      dateRange: {
-        start: startDate.toISOString().split('T')[0],
-        end: endDate.toISOString().split('T')[0]
-      },
-      summary: {
-        totalFlavors: productionPlan.length,
-        totalTubs: productionPlan.reduce((sum, flavor) => sum + flavor.totalTubs, 0),
-        upcomingDeliveries: deliveryPlans.length
-      }
+      dateRange: { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) },
+      summary,
     });
-
   } catch (error) {
-    console.error('Error fetching production plan:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch production plan' },
-      { status: 500 }
-    );
+    console.error('Error in production-plan:', error);
+    return NextResponse.json({ error: 'Failed to build production plan' }, { status: 500 });
   }
 }

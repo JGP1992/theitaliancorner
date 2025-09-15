@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../lib/prisma';
 import { AuthService } from '../../../lib/auth';
+import { logAudit } from '../../../lib/audit';
 
 interface ProductionIngredientInput {
   itemId: string;
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user has permission to create productions
-    if (!AuthService.hasPermission(user, 'productions:create')) {
+  if (!AuthService.hasPermission(user, 'production:create')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -64,6 +65,43 @@ export async function POST(request: NextRequest) {
       }
     });
 
+    // Inventory impact: create a factory stocktake that deducts used ingredients
+    // Choose factory store (prefer slug 'factory', else first available)
+    const stores = await prisma.store.findMany({ take: 1 });
+    if (stores.length === 0) {
+      // No stores configured; still return production but report missing inventory context
+      return NextResponse.json(production, { status: 201 });
+    }
+    const factoryStore = (await prisma.store.findFirst({ where: { slug: 'factory' } })) || stores[0];
+
+    // Create a stocktake with negative quantities to represent consumption
+    const stocktake = await prisma.stocktake.create({
+      data: {
+        storeId: factoryStore.id,
+        date: new Date(),
+        notes: `Production usage for recipe ${production.recipe.name} (batch ${batchSize} ${production.batchUnit})`,
+        items: {
+          create: production.ingredients.map((pi) => ({
+            itemId: pi.itemId,
+            quantity: -Math.abs(pi.quantityUsed),
+            note: `Used in production ${production.id}`
+          }))
+        }
+      }
+    });
+
+    // Audit log for production and inventory impact
+    await logAudit({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'create',
+      resource: 'production',
+      resourceId: production.id,
+      metadata: { batchSize, batchUnit: production.batchUnit, recipeId, stocktakeId: stocktake.id },
+      ip: request.headers.get('x-forwarded-for') || (request as any).ip || null,
+      userAgent: request.headers.get('user-agent'),
+    });
+
     return NextResponse.json(production, { status: 201 });
   } catch (error) {
     console.error('Failed to create production:', error);
@@ -87,7 +125,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if user has permission to read productions
-    if (!AuthService.hasPermission(user, 'productions:read')) {
+  if (!AuthService.hasPermission(user, 'production:read')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

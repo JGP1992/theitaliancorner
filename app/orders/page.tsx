@@ -1,6 +1,8 @@
 'use client';
 
+import '../globals.css';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Package, Truck, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 
 interface Order {
@@ -47,7 +49,7 @@ export default function OrdersPage() {
 
   const loadOrders = async () => {
     try {
-      const response = await fetch('/api/orders');
+  const response = await fetch('/api/orders', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setOrders(data);
@@ -105,12 +107,18 @@ export default function OrdersPage() {
     try {
       const response = await fetch(`/api/orders/${selectedOrder.id}/receive`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          receivedItems: Object.entries(receivedQuantities).map(([itemId, quantity]) => ({
-            itemId,
-            receivedQuantity: quantity
-          }))
+          // receivedQuantities keys are order item IDs; API expects item IDs
+          // Map each orderItemId to its corresponding item.id for correctness
+          receivedItems: Object.entries(receivedQuantities).map(([orderItemId, quantity]) => {
+            const orderItem = selectedOrder.items.find(i => i.id === orderItemId);
+            return {
+              itemId: orderItem ? orderItem.item.id : orderItemId, // fallback just in case
+              receivedQuantity: quantity
+            };
+          })
         })
       });
 
@@ -147,6 +155,14 @@ export default function OrdersPage() {
             Orders & Stock Receipts
           </h1>
           <p className="text-gray-600 mt-2">Manage supplier orders and record incoming stock</p>
+        </div>
+        <div>
+          <Link
+            href="/stock-ordering"
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            Create Order
+          </Link>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 'use client';
 
+import '../../globals.css';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Calendar, Package, FileText, Camera } from 'lucide-react';
@@ -25,6 +26,12 @@ interface Stocktake {
   id: string;
   date: string;
   submittedAt: string;
+  submittedBy?: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+  } | null;
   photoUrl: string | null;
   notes: string | null;
   store: {
@@ -144,6 +151,11 @@ export default function StocktakeDetailPage() {
               <div className="flex items-center text-sm text-gray-600">
                 <FileText className="h-4 w-4 mr-2" />
                 Submitted: {new Date(stocktake.submittedAt).toLocaleString()}
+                {stocktake.submittedBy && (
+                  <>
+                    {' '}by {stocktake.submittedBy.firstName} {stocktake.submittedBy.lastName}
+                  </>
+                )}
               </div>
               {stocktake.photoUrl && (
                 <div className="flex items-center text-sm text-gray-600">

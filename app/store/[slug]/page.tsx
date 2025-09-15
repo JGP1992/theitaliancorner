@@ -1,21 +1,6 @@
+import '../../globals.css';
 import { prisma } from '@/app/lib/prisma';
 import StocktakeForm from './stocktake-form';
-
-interface DeliveryPlanWithItems {
-  id: string;
-  date: Date;
-  items: Array<{
-    quantity: number;
-    item: {
-      id: string;
-      name: string;
-      category: {
-        name: string;
-      };
-      isActive: boolean;
-    };
-  }>;
-}
 
 interface CategoryWithItems {
   id: string;
@@ -32,29 +17,38 @@ interface CategoryWithItems {
   }>;
 }
 
-export default async function StorePage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default async function StorePage({ params }: any) {
+  const { slug } = params;
   const store = await prisma.store.findUnique({ where: { slug } });
   if (!store) return <div>Store not found</div>;
-
-  // Get ALL delivery history for this store to determine available gelato flavors
-  // (not just recent - stores may have leftover stock from previous deliveries)
-  const deliveryPlans: DeliveryPlanWithItems[] = await prisma.deliveryPlan.findMany({
+  // Fetch gelato delivery items for this store efficiently (flat list), limited to a reasonable window
+  const windowDays = 90; // look back ~3 months for delivered flavors (perf)
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const gelatoDeliveries = await prisma.deliveryItem.findMany({
     where: {
-      storeId: store.id,
-      status: { in: ['CONFIRMED', 'SENT'] }, // Only include completed deliveries
+      plan: {
+        storeId: store.id,
+        status: { in: ['CONFIRMED', 'SENT'] },
+        date: { gte: since },
+      },
+      item: {
+        isActive: true,
+        category: { name: 'Gelato Flavors' },
+      },
     },
-    include: {
-      items: {
-        include: {
-          item: {
-            include: { category: true }
-          }
-        }
-      }
+    select: {
+      quantity: true,
+      plan: { select: { date: true } },
+      item: {
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          category: { select: { name: true } },
+        },
+      },
     },
-    orderBy: { date: 'desc' },
-    take: 50, // Get more deliveries to capture all possible flavors
+    orderBy: { plan: { date: 'desc' } },
   });
 
   // Get all active items grouped by category for store stocktake
@@ -69,32 +63,32 @@ export default async function StorePage({ params }: { params: Promise<{ slug: st
   });
 
   // Extract ALL unique gelato flavors that have been delivered to this store
-  const deliveredGelatoFlavors = new Map();
-  deliveryPlans.forEach((plan: DeliveryPlanWithItems) => {
-    plan.items.forEach((deliveryItem) => {
-      const item = deliveryItem.item;
-      if (item.category.name === 'Gelato Flavors' && item.isActive) {
-        if (!deliveredGelatoFlavors.has(item.id)) {
-          deliveredGelatoFlavors.set(item.id, {
-            ...item,
-            firstDelivered: plan.date, // Keep track of first delivery
-            lastDelivered: plan.date, // And most recent delivery
-            totalDelivered: deliveryItem.quantity,
-            deliveryCount: 1
-          });
-        } else {
-          // Update with more recent delivery info
-          const existing = deliveredGelatoFlavors.get(item.id);
-          existing.lastDelivered = new Date(Math.max(
-            new Date(existing.lastDelivered).getTime(),
-            new Date(plan.date).getTime()
-          ));
-          existing.totalDelivered += deliveryItem.quantity;
-          existing.deliveryCount += 1;
-        }
+  const deliveredGelatoFlavors = new Map<string, any>();
+  for (const di of gelatoDeliveries) {
+    const item = di.item;
+    const planDate = di.plan?.date ? new Date(di.plan.date) : null;
+    if (!item || item.category?.name !== 'Gelato Flavors') continue;
+    if (!deliveredGelatoFlavors.has(item.id)) {
+      deliveredGelatoFlavors.set(item.id, {
+        id: item.id,
+        name: item.name,
+        isActive: item.isActive,
+        category: item.category,
+        firstDelivered: planDate,
+        lastDelivered: planDate,
+        totalDelivered: di.quantity || 0,
+        deliveryCount: 1,
+      });
+    } else {
+      const existing = deliveredGelatoFlavors.get(item.id);
+      if (planDate) {
+        existing.firstDelivered = existing.firstDelivered ? new Date(Math.min(existing.firstDelivered.getTime(), planDate.getTime())) : planDate;
+        existing.lastDelivered = existing.lastDelivered ? new Date(Math.max(existing.lastDelivered.getTime(), planDate.getTime())) : planDate;
       }
-    });
-  });
+      existing.totalDelivered += di.quantity || 0;
+      existing.deliveryCount += 1;
+    }
+  }
 
   // Convert delivered gelato flavors to array
   const availableGelatoFlavors = Array.from(deliveredGelatoFlavors.values())
@@ -124,6 +118,12 @@ export default async function StorePage({ params }: { params: Promise<{ slug: st
 
   return (
     <div>
+      {/* Remember last visited store on the client */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `try { localStorage.setItem('lastStoreSlug', ${JSON.stringify(slug)}); } catch {}`,
+        }}
+      />
       <h1 className="text-2xl font-semibold mb-1">{store.name} nightly stocktake</h1>
       <p className="text-sm text-gray-500 mb-6">Please count all items currently in your store, including gelato flavors, cleaning supplies, packaging, and other inventory.</p>
 

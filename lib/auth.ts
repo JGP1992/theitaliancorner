@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../app/lib/prisma';
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev';
 
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET environment variable is required');
@@ -51,6 +51,8 @@ export class AuthService {
       {
         userId: user.id,
         email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
         roles: user.roles,
         permissions: user.permissions
       },

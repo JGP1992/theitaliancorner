@@ -1,3 +1,4 @@
+import '../globals.css';
 import { prisma } from '@/app/lib/prisma';
 import Link from 'next/link';
 
@@ -9,6 +10,8 @@ type Ingredient = {
   unit: string | null;
   isActive: boolean;
 };
+
+export const dynamic = 'force-dynamic';
 
 export default async function IngredientsPage() {
   let ingredients: Ingredient[] = [];
@@ -176,7 +179,7 @@ export default async function IngredientsPage() {
                         </div>
                         <h3 className="font-medium text-gray-900 mb-1">{ingredient.name}</h3>
                         {ingredient.targetText && (
-                          <p className="text-sm text-gray-600">
+                          <p className="text-sm text-gray-600 whitespace-normal break-words">
                             Target: {ingredient.targetText}
                             {ingredient.unit && ` ${ingredient.unit}`}
                           </p>

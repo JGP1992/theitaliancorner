@@ -1,11 +1,14 @@
 module.exports = {
   apps: [{
     name: 'stocktake',
-    script: 'npm start',
-    cwd: '/path/to/your/stocktake/app',
+    script: 'npm',
+    args: 'start',
+    cwd: __dirname,
     env: {
       NODE_ENV: 'production',
-      PORT: 3000
+      PORT: 3000,
+      // DATABASE_URL, JWT_SECRET, and other secrets should be provided via the environment
+      // or a process manager like PM2 ecosystem with --update-env.
     },
     instances: 1,
     autorestart: true,

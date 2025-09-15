@@ -1,15 +1,21 @@
 'use client';
 
+import '../globals.css';
+
+// Set recovery link 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import QuickDelivery from './quick-delivery';
 import EditDeliveryPlan from './edit-delivery-plan';
+
+type TabKey = 'overview' | 'deliveries' | 'quick';
 
 type LatestStocktake = {
   id: string;
   submittedAt: Date;
   photoUrl: string | null;
   store: { name: string; slug: string };
+  submittedBy?: { id: string; email: string; firstName: string; lastName: string } | null;
   items: { quantity: number | null; item: { name: string; category: { name: string } } }[];
 };
 
@@ -56,11 +62,11 @@ type FactoryData = {
 async function getFactoryData(): Promise<FactoryData> {
   try {
     const [latestStocktakesRes, deliveryPlansRes, customersRes, storesRes, productionPlanRes] = await Promise.all([
-      fetch('/api/latest-stocktakes'),
-      fetch('/api/delivery-plans'),
-      fetch('/api/customers'),
-      fetch('/api/stores'),
-      fetch('/api/production-plan?days=7')
+      fetch('/api/latest-stocktakes', { credentials: 'include', cache: 'no-store' }),
+      fetch('/api/delivery-plans', { credentials: 'include', cache: 'no-store' }),
+      fetch('/api/customers', { credentials: 'include', cache: 'no-store' }),
+      fetch('/api/stores', { credentials: 'include', cache: 'no-store' }),
+      fetch('/api/production-plan?days=7', { credentials: 'include', cache: 'no-store' })
     ]);
 
     // Check if all responses are ok
@@ -68,7 +74,7 @@ async function getFactoryData(): Promise<FactoryData> {
       throw new Error(`API failures: latestStocktakes=${latestStocktakesRes.status}, deliveryPlans=${deliveryPlansRes.status}, customers=${customersRes.status}, stores=${storesRes.status}, productionPlan=${productionPlanRes.status}`);
     }
 
-    const [latestStocktakes, deliveryPlans, customers, stores, productionPlanData] = await Promise.all([
+    const [latestStocktakes, deliveryPlans, customersRaw, storesRaw, productionPlanData] = await Promise.all([
       latestStocktakesRes.json().catch(err => { console.error('latestStocktakes JSON parse error:', err); throw err; }),
       deliveryPlansRes.json().catch(err => { console.error('deliveryPlans JSON parse error:', err); throw err; }),
       customersRes.json().catch(err => { console.error('customers JSON parse error:', err); throw err; }),
@@ -76,29 +82,39 @@ async function getFactoryData(): Promise<FactoryData> {
       productionPlanRes.json().catch(err => { console.error('productionPlan JSON parse error:', err); throw err; })
     ]);
 
-    const totalStocktakesRes = await fetch('/api/stocktakes/count');
+    // Unwrap API shapes to arrays
+    const customers = Array.isArray(customersRaw) ? customersRaw : (customersRaw?.customers ?? []);
+    const stores = Array.isArray(storesRaw) ? storesRaw : (storesRaw?.stores ?? []);
+
+  const totalStocktakesRes = await fetch('/api/stocktakes/count', { credentials: 'include' });
     if (!totalStocktakesRes.ok) {
       throw new Error(`Stocktakes count API failed: ${totalStocktakesRes.status}`);
     }
     const totalStocktakesData = await totalStocktakesRes.json().catch(err => { console.error('stocktakes count JSON parse error:', err); throw err; });
     const totalStocktakes = totalStocktakesData.count || 0;
 
-    const activeStores = stores.length;
-    const totalCustomers = customers.length;
+  const activeStores = stores.length;
+  const totalCustomers = customers.length;
     const pendingDeliveries = deliveryPlans.filter((plan: DeliveryPlan) => plan.status === 'DRAFT').length;
 
-    // Today's deliveries
-    const today = new Date().toISOString().slice(0, 10);
-    const todaysDeliveries = deliveryPlans.filter((plan: DeliveryPlan) =>
-      plan.date.startsWith(today)
-    );
+    // Today's deliveries (use local date logic to avoid UTC drift)
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const todayLocal = `${now.getFullYear()}-${mm}-${dd}`;
+    const todaysDeliveries = deliveryPlans.filter((plan: DeliveryPlan) => {
+      const d = new Date(plan.date);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}` === todayLocal;
+    });
 
     // Weekly stats
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    console.log('Fetching stocktakes after:', weekAgo.toISOString());
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
 
-    const stocktakesThisWeekRes = await fetch(`/api/stocktakes?after=${weekAgo.toISOString()}`);
+  const stocktakesThisWeekRes = await fetch(`/api/stocktakes?after=${weekAgo.toISOString()}`, { credentials: 'include' });
     let stocktakesThisWeek = 0;
     if (stocktakesThisWeekRes.ok) {
       try {
@@ -106,7 +122,15 @@ async function getFactoryData(): Promise<FactoryData> {
           console.error('stocktakes weekly JSON parse error:', err);
           throw err;
         });
-        stocktakesThisWeek = Array.isArray(stocktakesData) ? stocktakesData.length : 0;
+        if (Array.isArray(stocktakesData)) {
+          stocktakesThisWeek = stocktakesData.length;
+        } else if (Array.isArray(stocktakesData?.stocktakes)) {
+          stocktakesThisWeek = stocktakesData.stocktakes.length;
+        } else if (typeof stocktakesData?.count === 'number') {
+          stocktakesThisWeek = stocktakesData.count;
+        } else {
+          stocktakesThisWeek = 0;
+        }
       } catch (error) {
         console.warn('Failed to parse stocktakes data:', error);
         stocktakesThisWeek = 0;
@@ -157,17 +181,17 @@ async function getFactoryData(): Promise<FactoryData> {
       percentage: deliveryPlans.length > 0 ? Math.round((count as number / deliveryPlans.length) * 100) : 0
     }));
 
-    // Calculate low stock items (items with total quantity <= 5)
+    // Calculate low stock items using per-item threshold (targetThreshold) or default 5
     const lowStockItems = productionPlanData.inventory
-      .filter((item: { totalQuantity: number }) => item.totalQuantity <= 5)
-      .sort((a: { totalQuantity: number }, b: { totalQuantity: number }) => a.totalQuantity - b.totalQuantity)
+      .filter((item: { totalQuantity: number; targetThreshold?: number }) => item.totalQuantity < (item.targetThreshold ?? 5))
+      .sort((a: { totalQuantity: number; targetThreshold?: number }, b: { totalQuantity: number; targetThreshold?: number }) => a.totalQuantity - b.totalQuantity)
       .slice(0, 10); // Show top 10 low stock items
 
     return {
       latestStocktakes,
       deliveryPlans,
-      customers,
-      stores,
+  customers,
+  stores,
       totalStocktakes,
       activeStores,
       totalCustomers,
@@ -211,6 +235,7 @@ export default function FactoryPage() {
   const [data, setData] = useState<FactoryData | null>(null);
   const [editingPlan, setEditingPlan] = useState<DeliveryPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
   useEffect(() => {
     getFactoryData()
@@ -240,6 +265,32 @@ export default function FactoryPage() {
       })
       .finally(() => setIsLoading(false));
   }, []);
+
+  // Initialize and persist selected tab (supports URL hashes like #deliveries)
+  useEffect(() => {
+    try {
+      const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('factoryActiveTab') : null;
+      const initial = (hash || saved) as TabKey | null;
+      if (initial && ['overview', 'deliveries', 'quick'].includes(initial)) {
+        setActiveTab(initial as TabKey);
+      }
+    } catch {
+      // no-op
+    }
+  }, []);
+
+  const selectTab = (tab: TabKey) => {
+    setActiveTab(tab);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('factoryActiveTab', tab);
+        window.history.replaceState(null, '', `#${tab}`);
+      }
+    } catch {
+      // no-op
+    }
+  };
 
   const refreshData = async () => {
     setIsLoading(true);
@@ -324,6 +375,30 @@ export default function FactoryPage() {
               </div>
               <div className="flex space-x-4">
                 <Link
+                  href="/factory/production"
+                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                >
+                  Today’s Production
+                </Link>
+                <Link
+                  href="/admin/production-schedule"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+                >
+                  Schedule Production
+                </Link>
+                <Link
+                  href="/factory/intake"
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                >
+                  Factory Intake
+                </Link>
+                <Link
+                  href="/factory/master-stocktake"
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors"
+                >
+                  Master Stocktake
+                </Link>
+                <Link
                   href={`/daily-deliveries?date=${new Date().toISOString().slice(0, 10)}`}
                   className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
                 >
@@ -339,7 +414,7 @@ export default function FactoryPage() {
                   href="/recipes"
                   className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors"
                 >
-                  👨‍� Recipe Builder
+                  👨‍🍳 Recipe Builder
                 </Link>
                 <Link
                   href="/stock-ordering"
@@ -357,7 +432,32 @@ export default function FactoryPage() {
             </div>
           </div>
 
-          {/* Enhanced Key Metrics */}
+          {/* Tabs */}
+          <div className="mb-8">
+            <div role="tablist" aria-label="Factory sections" className="flex overflow-x-auto no-scrollbar gap-2 border-b border-gray-200">
+              {[
+                { key: 'overview', label: 'Overview' },
+                { key: 'deliveries', label: 'Deliveries' },
+                { key: 'quick', label: 'Quick Create' },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  role="tab"
+                  aria-selected={activeTab === (key as TabKey)}
+                  onClick={() => selectTab(key as TabKey)}
+                  className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                    activeTab === (key as TabKey)
+                      ? 'border-blue-600 text-blue-700'
+                      : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activeTab === 'overview' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
             <div className="bg-white rounded-lg shadow-sm p-4 sm:p-6 border-l-4 border-blue-500">
               <div className="flex items-center">
@@ -427,8 +527,9 @@ export default function FactoryPage() {
               </div>
             </div>
           </div>
+          )}
 
-          {/* Production Planning Summary */}
+          {activeTab === 'overview' && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Production Planning</h2>
@@ -512,6 +613,9 @@ export default function FactoryPage() {
                         <div className="text-right">
                           <span className="text-lg font-bold text-red-600">{item.totalQuantity}</span>
                           <p className="text-xs text-gray-500">in stock</p>
+                          {typeof (item as any).targetThreshold === 'number' && (
+                            <p className="text-[10px] text-gray-500">min: {(item as any).targetThreshold}</p>
+                          )}
                         </div>
                       </div>
                     ))
@@ -535,8 +639,9 @@ export default function FactoryPage() {
               </div>
             </div>
           </div>
+          )}
 
-          {/* Ingredient Inventory */}
+          {activeTab === 'overview' && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Ingredient Inventory</h2>
@@ -557,41 +662,10 @@ export default function FactoryPage() {
                   Current Stock Levels
                 </h3>
                 <div className="space-y-3">
-                  {(() => {
-                    // This would need to be populated from the production-plan API or a new ingredients API
-                    // For now, showing a placeholder
-                    const sampleIngredients = [
-                      { name: 'Whole Milk', current: 45, target: 50, unit: 'liters' },
-                      { name: 'Heavy Cream', current: 18, target: 20, unit: 'liters' },
-                      { name: 'Sugar', current: 22, target: 25, unit: 'kg' },
-                      { name: 'Cocoa Powder', current: 4, target: 5, unit: 'kg' },
-                      { name: 'Vanilla Extract', current: 1.5, target: 2, unit: 'liters' },
-                    ];
-
-                    return sampleIngredients.map((ingredient, index) => {
-                      const percentage = (ingredient.current / ingredient.target) * 100;
-                      const isLow = percentage < 20;
-                      
-                      return (
-                        <div key={`ingredient-${ingredient.name}-${index}`} className="flex justify-between items-center">
-                          <div className="flex-1">
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="text-sm font-medium text-gray-900">{ingredient.name}</span>
-                              <span className={`text-sm font-semibold ${isLow ? 'text-red-600' : 'text-gray-900'}`}>
-                                {ingredient.current}/{ingredient.target} {ingredient.unit}
-                              </span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <div 
-                                className={`h-2 rounded-full ${isLow ? 'bg-red-500' : percentage < 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                                style={{ width: `${Math.min(percentage, 100)}%` }}
-                              ></div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
+                  <div className="text-center py-6">
+                    <p className="text-gray-700 font-medium">Ingredient tracking is coming soon</p>
+                    <p className="text-sm text-gray-500">This section will display live ingredient inventory once connected</p>
+                  </div>
                 </div>
               </div>
 
@@ -641,12 +715,14 @@ export default function FactoryPage() {
                       <p className="text-gray-600 text-center py-4">No production scheduled this week</p>
                     );
                   })()}
+                  <p className="text-xs text-gray-500 text-right">Estimates based on tubs per simplified recipe</p>
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+            )}
 
-          {/* Analytics Dashboard */}
+            {activeTab === 'overview' && (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6 mb-8">
             {/* Weekly Stats */}
             <div className="bg-white rounded-lg shadow-sm p-6">
@@ -732,8 +808,9 @@ export default function FactoryPage() {
               </div>
             </div>
           </div>
+          )}
 
-          {/* Recent Stocktakes */}
+          {activeTab === 'overview' && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Recent Stocktakes</h2>
@@ -743,7 +820,7 @@ export default function FactoryPage() {
               {data.latestStocktakes.map((stocktake: LatestStocktake) => (
                 <div key={stocktake.id} className="bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                   <div className="p-6">
-                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
                           <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -752,7 +829,14 @@ export default function FactoryPage() {
                         </div>
                         <div>
                           <h3 className="font-medium text-gray-900">{stocktake.store.name}</h3>
-                          <p className="text-sm text-gray-500">{new Date(stocktake.submittedAt).toLocaleDateString()}</p>
+                            <p className="text-sm text-gray-500">
+                              {new Date(stocktake.submittedAt).toLocaleDateString()}
+                              {stocktake.submittedBy && (
+                                <>
+                                  {' '}• by {stocktake.submittedBy.firstName} {stocktake.submittedBy.lastName}
+                                </>
+                              )}
+                            </p>
                         </div>
                       </div>
                       {stocktake.photoUrl && (
@@ -785,8 +869,9 @@ export default function FactoryPage() {
               ))}
             </div>
           </div>
+          )}
 
-          {/* Delivery Plans */}
+          {activeTab === 'deliveries' && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Delivery Plans</h2>
@@ -855,6 +940,8 @@ export default function FactoryPage() {
                   })}
               </div>
             </div>
+
+
 
             {/* Today's Deliveries */}
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 mb-6 border border-blue-200">
@@ -925,10 +1012,8 @@ export default function FactoryPage() {
                                 ? `${plan.store.name} + ${plan.customers.length} Customer${plan.customers.length > 1 ? 's' : ''}`
                                 : plan.customers.length > 0
                                 ? `${plan.customers.length} Customer${plan.customers.length > 1 ? 's' : ''}`
-                                : plan.store?.name || 'No Destination'
-                              }
+                                : (plan.store?.name || 'No Destination')}
                             </p>
-                            <p className="text-sm text-gray-500">{new Date(plan.date).toLocaleDateString()}</p>
                           </div>
                         </div>
                         <div className="flex items-center space-x-4">
@@ -977,11 +1062,15 @@ export default function FactoryPage() {
             </div>
           </div>
 
-          {/* Quick Delivery Form */}
+          )}
+
+          {activeTab === 'quick' && (
           <div className="bg-white rounded-lg shadow-sm border p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-6">Create Quick Delivery Plan</h2>
-            <QuickDelivery customers={data.customers} stores={data.stores} />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Create Quick Delivery Plan</h2>
+            <p className="text-gray-600 mb-6">This tool has moved to the Set Deliveries page.</p>
+            <Link href="/deliveries/set" className="inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Go to Set Deliveries →</Link>
           </div>
+          )}
         </div>
       </div>
 

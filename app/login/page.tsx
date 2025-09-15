@@ -1,5 +1,7 @@
 'use client';
 
+import '../globals.css';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
@@ -15,14 +17,21 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const router = useRouter();
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, checkAuth, isLoading: authLoading } = useAuth();
+
+  // Prefetch home to make post-login navigation instant
+  useEffect(() => {
+    router.prefetch('/');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated) {
-      router.push('/');
+    // Only redirect away from /login after auth has settled and user is authed
+    if (!authLoading && isAuthenticated) {
+      router.replace('/');
     }
-  }, [isAuthenticated, router]);
+  }, [authLoading, isAuthenticated, router]);
 
   // Load saved email if remember me was checked
   useEffect(() => {
@@ -35,52 +44,15 @@ export default function LoginPage() {
     }
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Handle remember me
-        if (rememberMe) {
-          localStorage.setItem('rememberedEmail', email);
-          localStorage.setItem('rememberMe', 'true');
-        } else {
-          localStorage.removeItem('rememberedEmail');
-          localStorage.removeItem('rememberMe');
-        }
-
-        // Store token in cookie with appropriate expiry
-        const maxAge = rememberMe ? 604800 : 86400; // 7 days or 1 day
-        document.cookie = `authToken=${data.token}; path=/; max-age=${maxAge}; samesite=lax`;
-
-        // Use AuthContext to handle login
-        login(data.user);
-
-        setSuccess('Login successful! Redirecting...');
-
-        // Wait for auth state to update before redirecting
-        setTimeout(() => {
-          // Force a page reload to ensure middleware sees the updated auth state
-          window.location.href = '/';
-        }, 1500);
-      } else {
-        setError(data.error || 'Login failed');
-      }
-    } catch (err) {
-      setError('Network error. Please check your connection and try again.');
-    } finally {
-      setIsLoading(false);
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    // Let the browser submit the form and follow the server redirect.
+    // Persist remember-me email locally before the navigation.
+    if (rememberMe) {
+      localStorage.setItem('rememberedEmail', email);
+      localStorage.setItem('rememberMe', 'true');
+    } else {
+      localStorage.removeItem('rememberedEmail');
+      localStorage.removeItem('rememberMe');
     }
   };
 
@@ -102,7 +74,7 @@ export default function LoginPage() {
 
         {/* Login Form */}
         <div className="bg-white rounded-xl shadow-lg p-8">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+          <form className="space-y-6" onSubmit={handleSubmit} action="/api/auth/login" method="post">
             {/* Email Field */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
@@ -164,7 +136,7 @@ export default function LoginPage() {
               <div className="flex items-center">
                 <input
                   id="remember-me"
-                  name="remember-me"
+                  name="rememberMe"
                   type="checkbox"
                   className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   checked={rememberMe}

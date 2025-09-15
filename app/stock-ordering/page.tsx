@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import '../globals.css';
+
+import { useState, useEffect, useRef } from 'react';
 import { ShoppingCart, AlertTriangle, Plus, Truck } from 'lucide-react';
 
 interface Stocktake {
@@ -55,6 +57,48 @@ export default function StockOrderingPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [unitOptions, setUnitOptions] = useState<string[]>(['units', 'kg', 'g', 'L', 'ml', 'tub', 'cup', 'tray', 'box', 'case']);
+  const qtyRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Helpers: normalize unit labels and filter out IDs mistakenly appearing as units
+  const isProbablyId = (s: string) => /^[a-z0-9_-]{20,}$/i.test(s); // e.g., cuid-like strings
+  const normalizeUnit = (u?: string | null): string | null => {
+    if (!u) return null;
+    const raw = u.trim();
+    if (!raw) return null;
+    if (isProbablyId(raw)) return null; // drop id-like tokens
+    const lower = raw.toLowerCase();
+    // canonical mappings
+    const map: Record<string, string> = {
+      kg: 'kg', kgs: 'kg', kilogram: 'kg', kilograms: 'kg',
+      g: 'g', gram: 'g', grams: 'g',
+      l: 'L', lt: 'L', litre: 'L', liters: 'L', liter: 'L', litres: 'L',
+      ml: 'ml',
+      unit: 'units', units: 'units',
+      tub: 'tub', tubs: 'tub',
+      cup: 'cup', cups: 'cup',
+      tray: 'tray', trays: 'tray',
+      box: 'box', boxes: 'box',
+      case: 'case', cases: 'case',
+      carton: 'carton', cartons: 'carton',
+      pack: 'pack', packs: 'pack',
+      dozen: 'dozen',
+      sleeve: 'sleeve', sleeves: 'sleeve'
+    };
+    return map[lower] || raw; // keep as-is if not mapped
+  };
+
+  // Unit behavior helpers
+  const COUNT_UNITS = new Set(['unit', 'units', 'tub', 'cup', 'tray', 'box', 'case', 'carton', 'pack', 'dozen', 'sleeve']);
+  const isCountUnit = (u?: string | null) => !!(u && COUNT_UNITS.has(u.toLowerCase()));
+  const inputStepFor = (u?: string | null) => {
+    if (isCountUnit(u)) return 1;
+    if (!u) return 0.1;
+    const lu = u.toLowerCase();
+    if (lu === 'g' || lu === 'ml') return 1; // integer grams and ml
+    return 0.1; // kg/L and general numeric units
+  };
+  const inputMinFor = (u?: string | null) => (isCountUnit(u) ? 1 : (u && (u.toLowerCase() === 'g' || u.toLowerCase() === 'ml') ? 1 : 0.1));
 
   useEffect(() => {
     loadLowStockItems();
@@ -62,43 +106,73 @@ export default function StockOrderingPage() {
 
   const loadLowStockItems = async () => {
     try {
-      // Get latest stocktakes
-      const stocktakeResponse = await fetch('/api/stocktakes?limit=50');
-      const stocktakes: Stocktake[] = await stocktakeResponse.json();
+      // Fetch aggregated inventory with per-item thresholds and all items for id/unit mapping
+      const [planRes, itemsRes] = await Promise.all([
+        fetch('/api/production-plan'),
+        fetch('/api/items')
+      ]);
 
-      // Get all items
-      const itemsResponse = await fetch('/api/items');
-      const items: Item[] = await itemsResponse.json();
+      const planData = await planRes.json();
+  const items: Item[] = await itemsRes.json();
 
-      // Calculate current stock levels and identify low stock items
+      type InventoryEntry = {
+        itemName: string;
+        category: string;
+        totalQuantity: number;
+        lastUpdated: string;
+        targetThreshold?: number;
+        stocktakes: Array<{ store: string; quantity: number; date: string }>
+      };
+
+      const inventory: InventoryEntry[] = planData?.inventory || [];
+
+      // Build a lookup map for items by name+category
+      const itemByNameCat = new Map<string, Item>();
+      const unitsSet = new Set<string>(unitOptions);
+      items.forEach((it) => {
+        const key = `${it.name}|${it.category?.name || ''}`;
+        itemByNameCat.set(key, it);
+        const nu = normalizeUnit(it.unit);
+        if (nu) unitsSet.add(nu);
+      });
+      setUnitOptions(Array.from(unitsSet));
+
       const lowStock: LowStockItem[] = [];
 
-      items.forEach((item: Item) => {
-        // Find the most recent stocktake for this item
-        const recentStocktakes = stocktakes
-          .filter((st: Stocktake) => st.items.some((si: StocktakeItem) => si.itemId === item.id))
-          .sort((a: Stocktake, b: Stocktake) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-        if (recentStocktakes.length > 0) {
-          const latestStocktake = recentStocktakes[0];
-          const stocktakeItem = latestStocktake.items.find((si: StocktakeItem) => si.itemId === item.id);
-
-          if (stocktakeItem && stocktakeItem.quantity !== null && stocktakeItem.quantity !== undefined) {
-            const currentStock = stocktakeItem.quantity;
-            const targetStock = item.targetNumber || 1;
-
-            // Consider low stock if current is less than target
-            if (currentStock < targetStock) {
-              lowStock.push({
-                ...item,
-                currentStock,
-                lastStocktake: new Date(latestStocktake.date).toLocaleDateString(),
-                storeName: latestStocktake.store.name
-              });
-            }
-          }
+      for (const inv of inventory) {
+        const key = `${inv.itemName}|${inv.category || ''}`;
+        const baseItem = itemByNameCat.get(key);
+        if (!baseItem) {
+          // If we can't map to an actual item (no id), skip as we can't create an order line
+          continue;
         }
-      });
+
+        const threshold = inv.targetThreshold ?? baseItem.targetNumber ?? 5;
+        const currentStock = inv.totalQuantity ?? 0;
+
+        if (currentStock < threshold) {
+          // Determine most recent stocktake info for display
+          let lastStocktake = '';
+          let storeName = '';
+          if (inv.stocktakes && inv.stocktakes.length > 0) {
+            const latest = inv.stocktakes.reduce((a, b) => (a.date > b.date ? a : b));
+            lastStocktake = new Date(latest.date).toLocaleDateString();
+            storeName = latest.store;
+          } else {
+            lastStocktake = new Date(inv.lastUpdated).toLocaleDateString();
+            storeName = '—';
+          }
+
+          lowStock.push({
+            ...baseItem,
+            // Show the effective threshold as the target so UI is consistent
+            targetNumber: threshold,
+            currentStock,
+            lastStocktake,
+            storeName
+          });
+        }
+      }
 
       setLowStockItems(lowStock);
     } catch (error) {
@@ -117,14 +191,23 @@ export default function StockOrderingPage() {
           : oi
       ));
     } else {
-      const targetQuantity = item.targetNumber || 1;
-      const orderQuantity = Math.max(targetQuantity - item.currentStock, 1);
-
+      const targetQuantity = item.targetNumber ?? 1;
+      const delta = (targetQuantity - item.currentStock);
+      const defaultUnit = normalizeUnit(item.unit) || 'units';
+      const orderQuantity = (() => {
+        if (isCountUnit(defaultUnit)) {
+          return Math.max(Math.ceil(delta), 1);
+        }
+        const step = inputStepFor(defaultUnit);
+        // Round to nearest step for weight/volume
+        const rounded = step === 1 ? Math.round(delta) : Math.round(delta / step) * step;
+        return Math.max(rounded, inputMinFor(defaultUnit));
+      })();
       setOrderItems([...orderItems, {
         itemId: item.id,
         item,
         quantity: orderQuantity,
-        unit: item.unit || 'units'
+        unit: defaultUnit
       }]);
     }
   };
@@ -134,13 +217,72 @@ export default function StockOrderingPage() {
   };
 
   const updateOrderQuantity = (itemId: string, quantity: number) => {
+    setOrderItems(orderItems.map(oi => {
+      if (oi.itemId !== itemId) return oi;
+      const u = oi.unit;
+      let q = quantity;
+      if (isCountUnit(u)) {
+        q = Math.max(Math.round(q), 1);
+      } else {
+        const step = inputStepFor(u);
+        const min = inputMinFor(u);
+        if (step === 1) {
+          q = Math.round(q);
+        } else {
+          q = Math.round(q / step) * step;
+        }
+        q = Math.max(q, min);
+      }
+      return { ...oi, quantity: q };
+    }));
+  };
+
+  const updateOrderUnit = (itemId: string, unit: string) => {
     setOrderItems(orderItems.map(oi =>
-      oi.itemId === itemId ? { ...oi, quantity } : oi
+      oi.itemId === itemId ? { ...oi, unit } : oi
     ));
+  };
+
+  const onChangeUnit = (itemId: string, value: string, currentUnit: string, selectEl?: HTMLSelectElement) => {
+    if (value === '__custom__') {
+      const custom = prompt('Enter custom unit label (e.g., dozen, sleeves, cartons):', currentUnit || '');
+      if (custom && custom.trim()) {
+        const trimmed = custom.trim();
+        if (!unitOptions.includes(trimmed)) {
+          setUnitOptions((prev) => Array.from(new Set([...prev, trimmed])));
+        }
+        updateOrderUnit(itemId, trimmed);
+      } else {
+        // Revert to current unit if cancelled
+        updateOrderUnit(itemId, currentUnit);
+      }
+      // Close the dropdown and move focus to quantity input (mobile friendly)
+      setTimeout(() => {
+        try {
+          if (selectEl) selectEl.blur();
+          qtyRefs.current[itemId]?.focus();
+        } catch {}
+      }, 0);
+      return;
+    }
+    updateOrderUnit(itemId, value);
+    setTimeout(() => {
+      try {
+        if (selectEl) selectEl.blur();
+        qtyRefs.current[itemId]?.focus();
+      } catch {}
+    }, 0);
   };
 
   const createOrder = async () => {
     if (orderItems.length === 0) return;
+
+    // Basic validation: all quantities must be > 0
+    const invalid = orderItems.find((oi) => !(typeof oi.quantity === 'number' && oi.quantity > 0));
+    if (invalid) {
+      alert(`Please enter a quantity greater than 0 for '${invalid.item.name}'.`);
+      return;
+    }
 
     try {
       const response = await fetch('/api/orders', {
@@ -204,13 +346,23 @@ export default function StockOrderingPage() {
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
-                    min="0"
-                    step="0.1"
+                    min={inputMinFor(item.unit)}
+                    step={inputStepFor(item.unit)}
                     value={item.quantity}
                     onChange={(e) => updateOrderQuantity(item.itemId, parseFloat(e.target.value) || 0)}
                     className="w-20 px-2 py-1 text-sm border rounded"
+                    ref={(el) => { qtyRefs.current[item.itemId] = el; }}
                   />
-                  <span className="text-sm text-gray-600">{item.unit}</span>
+                  <select
+                    value={item.unit}
+                    onChange={(e) => onChangeUnit(item.itemId, e.target.value, item.unit, e.currentTarget)}
+                    className="px-2 py-1 text-sm border rounded bg-white"
+                  >
+                    {unitOptions.map((u) => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                    <option value="__custom__">Custom…</option>
+                  </select>
                   <button
                     onClick={() => removeFromOrder(item.itemId)}
                     className="text-red-600 hover:text-red-800 text-sm"
@@ -266,10 +418,17 @@ export default function StockOrderingPage() {
                         {item.currentStock} {item.unit || 'units'}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Target:</span>
-                      <span className="font-medium">
-                        {item.targetNumber || 1} {item.unit || 'units'}
+                    <div className="flex justify-between gap-2">
+                      <span className="text-gray-600 shrink-0">Target:</span>
+                      <span className="font-medium text-right whitespace-normal break-words">
+                        {(() => {
+                          const targetDisplay = item.targetText ?? (
+                            item.targetNumber != null
+                              ? `${item.targetNumber}${item.unit ? ` ${item.unit}` : ''}`
+                              : null
+                          );
+                          return targetDisplay || `${1} ${item.unit || 'units'}`;
+                        })()}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -322,13 +481,23 @@ export default function StockOrderingPage() {
                             <div className="flex items-center gap-2">
                               <input
                                 type="number"
-                                min="0"
-                                step="0.1"
+                                min={inputMinFor(item.unit)}
+                                step={inputStepFor(item.unit)}
                                 value={item.quantity}
                                 onChange={(e) => updateOrderQuantity(item.itemId, parseFloat(e.target.value) || 0)}
                                 className="w-20 px-2 py-1 text-sm border rounded"
+                                ref={(el) => { qtyRefs.current[item.itemId] = el; }}
                               />
-                              <span className="text-sm text-gray-600">{item.unit}</span>
+                              <select
+                                value={item.unit}
+                                onChange={(e) => onChangeUnit(item.itemId, e.target.value, item.unit, e.currentTarget)}
+                                className="px-2 py-1 text-sm border rounded bg-white"
+                              >
+                                {unitOptions.map((u) => (
+                                  <option key={u} value={u}>{u}</option>
+                                ))}
+                                <option value="__custom__">Custom…</option>
+                              </select>
                             </div>
                             <button
                               onClick={() => removeFromOrder(item.itemId)}

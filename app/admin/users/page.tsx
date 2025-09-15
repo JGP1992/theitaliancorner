@@ -1,5 +1,6 @@
 'use client';
 
+import '../../globals.css';
 import { useState, useEffect } from 'react';
 import { User, Shield, Plus, Edit, Trash2, Check, X } from 'lucide-react';
 

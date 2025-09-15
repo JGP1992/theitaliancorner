@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../lib/prisma';
 import { AuthService } from '../../../lib/auth';
+import { logAudit } from '../../../lib/audit';
 
 interface StocktakeWhere {
   submittedAt?: {
@@ -56,18 +57,12 @@ export async function GET(req: NextRequest) {
     const stocktakes = await prisma.stocktake.findMany({
       where,
       orderBy: { submittedAt: 'desc' },
-      include: { store: true, items: { include: { item: true } } },
+      include: ({ store: true, submittedBy: { select: { firstName: true, lastName: true } }, items: { include: { item: true } } } as any),
       take: 100,
     });
 
     // Transform the data for the frontend
-    const transformedStocktakes = stocktakes.map((stocktake: {
-      id: string;
-      date: Date;
-      store: { id: string; name: string; slug: string };
-      submittedAt: Date;
-      items: { quantity: number | null }[]
-    }) => ({
+  const transformedStocktakes = stocktakes.map((stocktake: any) => ({
       id: stocktake.id,
       date: stocktake.date,
       store: {
@@ -76,6 +71,11 @@ export async function GET(req: NextRequest) {
         slug: stocktake.store.slug
       },
       submittedAt: stocktake.submittedAt,
+      isMaster: Boolean(stocktake.isMaster),
+      submittedBy: stocktake.submittedBy ? {
+        firstName: stocktake.submittedBy.firstName,
+        lastName: stocktake.submittedBy.lastName,
+      } : null,
       itemCount: stocktake.items.length,
       totalQuantity: stocktake.items.reduce((sum: number, item: { quantity: number | null }) => sum + (item.quantity || 0), 0)
     }));
@@ -109,12 +109,13 @@ export async function POST(req: NextRequest) {
 
     const apiKey = req.headers.get('x-api-key') ?? undefined;
     const body = await req.json();
-    const { storeSlug, date, photoUrl, items, notes }: {
+    const { storeSlug, date, photoUrl, items, notes, isMaster }: {
       storeSlug: string;
       date: string;
       photoUrl?: string;
       notes?: string;
       items: { itemId: string; quantity?: number; note?: string }[];
+      isMaster?: boolean;
     } = body;
 
     if (!storeSlug || !date || !Array.isArray(items)) {
@@ -126,21 +127,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
     }
 
+    // If isMaster is requested, ensure it's for Factory store
+    const masterFlag = Boolean(isMaster);
+    if (masterFlag && store.slug !== 'factory') {
+      return NextResponse.json({ error: 'Master stocktake can only be recorded for the Factory' }, { status: 400 });
+    }
+
     const created = await prisma.stocktake.create({
-      data: {
+      data: ({
         storeId: store.id,
         date: new Date(date),
         photoUrl,
         notes,
+        isMaster: masterFlag,
+        submittedByUserId: user.id,
         items: {
           createMany: {
             data: items.map((i) => ({ itemId: i.itemId, quantity: i.quantity ?? null, note: i.note })),
           },
         },
+      }) as any,
+      include: {
+        items: true,
+        submittedBy: {
+          select: { firstName: true, lastName: true }
+        }
       },
-      include: { items: true },
     });
-    return NextResponse.json(created);
+    // Audit: created stocktake
+    await logAudit({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'create',
+      resource: 'stocktake',
+      resourceId: created.id,
+      metadata: { storeSlug, itemCount: items.length },
+      ip: req.headers.get('x-forwarded-for') || (req as any).ip || null,
+      userAgent: req.headers.get('user-agent'),
+    });
+  return NextResponse.json(created);
   } catch (error) {
     console.error('Error creating stocktake:', error);
     return NextResponse.json(

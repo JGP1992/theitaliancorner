@@ -29,17 +29,44 @@ export async function GET(req: NextRequest) {
       ]
     });
 
-    // Get current stock levels from latest stocktakes
-    const latestStocktakes = await prisma.stocktake.findMany({
-      include: {
-        items: {
-          include: { item: true }
+    // Prefer current stock from the latest Factory master stocktake if available; otherwise fall back to recent stocktakes
+    const factoryStore = await prisma.store.findUnique({ where: { slug: 'factory' } });
+    let factoryMaster: (typeof prisma.stocktake) | null = null as any;
+    let baseline: 'master' | 'latest' = 'latest';
+    let baselineDate: string | null = null;
+
+    let latestStocktakes: Array<any> = [];
+
+    if (factoryStore) {
+      const master = await prisma.stocktake.findFirst({
+        where: ({ storeId: factoryStore.id, isMaster: true } as any),
+        include: {
+          items: {
+            include: { item: true }
+          },
+          store: true,
         },
-        store: true
-      },
-      orderBy: { date: 'desc' },
-      take: 50 // Get recent stocktakes
-    });
+        orderBy: { date: 'desc' },
+      });
+      if (master) {
+        factoryMaster = master as any;
+        baseline = 'master';
+        baselineDate = master.date?.toISOString?.() ?? null;
+      }
+    }
+
+    if (!factoryMaster) {
+      latestStocktakes = await prisma.stocktake.findMany({
+        include: {
+          items: {
+            include: { item: true }
+          },
+          store: true
+        },
+        orderBy: { date: 'desc' },
+        take: 50 // Get recent stocktakes
+      });
+    }
 
     // Get incoming supplies (pending orders)
     const today = new Date();
@@ -93,14 +120,26 @@ export async function GET(req: NextRequest) {
       }
     });
 
+    // Build a quick lookup from the master stocktake if present
+    const masterMap: Record<string, number> = {};
+    if (factoryMaster) {
+      for (const sti of (factoryMaster as any).items ?? []) {
+        if (sti?.itemId) masterMap[sti.itemId] = typeof sti.quantity === 'number' ? sti.quantity : 0;
+      }
+    }
+
     // Calculate inventory data for each item
     const inventoryData = items.map((item: { id: string; name: string; category: { name: string }; targetNumber: number | null; unit: string | null }) => {
-      // Get current stock from latest stocktake
-      const latestStocktakeItem = latestStocktakes
-        .flatMap((st: { items: { itemId: string; quantity: number | null }[] }) => st.items)
-        .find((sti: { itemId: string; quantity: number | null }) => sti.itemId === item.id);
-
-      const currentStock = latestStocktakeItem?.quantity || 0;
+      // Get current stock from Factory master stocktake if available, else from latest stocktakes across stores
+      let currentStock = 0;
+      if (factoryMaster && masterMap[item.id] != null) {
+        currentStock = masterMap[item.id] || 0;
+      } else if (latestStocktakes.length > 0) {
+        const latestStocktakeItem = latestStocktakes
+          .flatMap((st: { items: { itemId: string; quantity: number | null }[] }) => st.items)
+          .find((sti: { itemId: string; quantity: number | null }) => sti.itemId === item.id);
+        currentStock = latestStocktakeItem?.quantity || 0;
+      }
 
       // Calculate incoming quantity
       const incomingQuantity = incomingOrders
@@ -160,7 +199,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       inventory: inventoryData,
-      summary
+      summary,
+      baseline,
+      baselineDate
     });
   } catch (error) {
     console.error('Error fetching inventory dashboard data:', error);

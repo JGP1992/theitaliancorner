@@ -40,10 +40,11 @@ export async function GET(
 
     const { id: stocktakeId } = await params;
 
-    const stocktake = await prisma.stocktake.findUnique({
+    const stocktake = await (prisma.stocktake.findUnique({
       where: { id: stocktakeId },
       include: {
         store: true,
+        submittedBy: { select: { firstName: true, lastName: true } },
         items: {
           include: {
             item: {
@@ -52,33 +53,35 @@ export async function GET(
               }
             }
           },
-          orderBy: {
-            item: {
-              category: { sortOrder: 'asc' },
-              sortOrder: 'asc',
-              name: 'asc'
-            }
-          }
+          orderBy: [
+            { item: { category: { sortOrder: 'asc' } } },
+            { item: { sortOrder: 'asc' } },
+            { item: { name: 'asc' } }
+          ]
         }
-      }
-    });
+      } as any
+    }) as any);
 
     if (!stocktake) {
       return NextResponse.json({ error: 'Stocktake not found' }, { status: 404 });
     }
 
     // Calculate totals
-    const itemCount = stocktake.items.filter((item: StocktakeItemWithItem) => item.quantity !== null).length;
-    const totalQuantity = stocktake.items.reduce((sum: number, item: StocktakeItemWithItem) => sum + (item.quantity || 0), 0);
+  const itemCount = (stocktake.items as StocktakeItemWithItem[]).filter((item: StocktakeItemWithItem) => item.quantity !== null).length;
+  const totalQuantity = (stocktake.items as StocktakeItemWithItem[]).reduce((sum: number, item: StocktakeItemWithItem) => sum + (item.quantity || 0), 0);
 
     const formattedStocktake = {
       id: stocktake.id,
       date: stocktake.date,
       submittedAt: stocktake.submittedAt,
+      submittedBy: stocktake.submittedBy ? {
+        firstName: stocktake.submittedBy.firstName,
+        lastName: stocktake.submittedBy.lastName,
+      } : null,
       photoUrl: stocktake.photoUrl,
       notes: stocktake.notes,
       store: stocktake.store,
-      items: stocktake.items.map((stocktakeItem: StocktakeItemWithItem) => ({
+      items: (stocktake.items as StocktakeItemWithItem[]).map((stocktakeItem: StocktakeItemWithItem) => ({
         id: stocktakeItem.id,
         itemId: stocktakeItem.itemId,
         quantity: stocktakeItem.quantity,

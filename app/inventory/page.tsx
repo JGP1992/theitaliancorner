@@ -1,7 +1,8 @@
 'use client';
 
+import '../globals.css';
 import { useState, useEffect } from 'react';
-import { Package, TrendingUp, TrendingDown, AlertTriangle, Plus, Minus, Eye } from 'lucide-react';
+import { Package, TrendingUp, TrendingDown, AlertTriangle, Plus, Minus, Eye, Trash2 } from 'lucide-react';
 
 interface InventoryItem {
   id: string;
@@ -35,9 +36,13 @@ export default function InventoryDashboard() {
     outgoingToday: 0,
     productionToday: 0
   });
+  const [baseline, setBaseline] = useState<'master' | 'latest'>('latest');
+  const [baselineDate, setBaselineDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetchInventoryData();
@@ -45,16 +50,43 @@ export default function InventoryDashboard() {
 
   const fetchInventoryData = async () => {
     try {
-      const response = await fetch('/api/inventory/dashboard');
+      const response = await fetch('/api/inventory/dashboard', { credentials: 'include', cache: 'no-store' });
       if (response.ok) {
         const data = await response.json();
         setInventory(data.inventory);
         setSummary(data.summary);
+        if (data.baseline) setBaseline(data.baseline);
+        if (data.baselineDate) setBaselineDate(data.baselineDate);
       }
     } catch (error) {
       console.error('Failed to fetch inventory data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const removeFromFactoryInventory = async (itemId: string, itemName: string) => {
+    if (!confirm(`Remove "${itemName}" from the Factory's inventory list?`)) return;
+    setRemovingId(itemId);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/stores/factory/inventory', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ itemId })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to remove item');
+      }
+      // Optimistically hide the item locally
+      setInventory((prev) => prev.filter((i) => i.id !== itemId));
+      setMessage('Item removed from Factory inventory.');
+    } catch (e: any) {
+      setMessage(e?.message || 'Failed to remove item');
+    } finally {
+      setRemovingId(null);
     }
   };
 
@@ -102,7 +134,7 @@ export default function InventoryDashboard() {
           <p className="mt-2 text-gray-600">Comprehensive view of stock levels, movements, and forecasts</p>
         </div>
 
-        {/* Summary Cards */}
+        {/* Summary + Baseline */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
@@ -152,6 +184,13 @@ export default function InventoryDashboard() {
             </div>
           </div>
         </div>
+
+        {baseline && (
+          <div className="mb-6 text-sm text-gray-600">
+            Baseline: {baseline === 'master' ? 'Factory master stocktake' : 'Latest stocktakes'}
+            {baselineDate ? ` • as of ${new Date(baselineDate).toLocaleDateString()}` : ''}
+          </div>
+        )}
 
         {/* Filters */}
         <div className="mb-6 flex flex-col sm:flex-row gap-4">
@@ -250,9 +289,19 @@ export default function InventoryDashboard() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button className="text-blue-600 hover:text-blue-900">
-                      <Eye className="h-5 w-5" />
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button title="View details" className="text-blue-600 hover:text-blue-900">
+                        <Eye className="h-5 w-5" />
+                      </button>
+                      <button
+                        title="Remove from Factory inventory"
+                        onClick={() => removeFromFactoryInventory(item.id, item.name)}
+                        disabled={removingId === item.id}
+                        className={`text-red-600 hover:text-red-900 disabled:opacity-50 ${removingId === item.id ? 'cursor-wait' : ''}`}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -265,6 +314,12 @@ export default function InventoryDashboard() {
             <Package className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No items found</h3>
             <p className="mt-1 text-sm text-gray-500">Try adjusting your search or filter criteria.</p>
+          </div>
+        )}
+
+        {message && (
+          <div className={`mt-4 text-sm ${/success|removed|ok/i.test(message) ? 'text-green-700' : 'text-red-700'}`}>
+            {message}
           </div>
         )}
       </div>
