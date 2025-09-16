@@ -2,6 +2,11 @@
 
 import '../globals.css';
 
+// Avoid static prerender on Vercel export/build; this page depends on runtime state/cookies.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
