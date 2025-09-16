@@ -1,0 +1,41 @@
+name: Deploy DB migrations
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies (ci)
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Run prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate:deploy
+
+      - name: (Optional) Minimal seed without sample data
+        if: ${{ secrets.RUN_MINIMAL_SEED == 'true' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEED_MODE: minimal
+          FIRST_ADMIN_EMAIL: ${{ secrets.FIRST_ADMIN_EMAIL }}
+          FIRST_ADMIN_PASSWORD: ${{ secrets.FIRST_ADMIN_PASSWORD }}
+          FIRST_ADMIN_FIRSTNAME: ${{ secrets.FIRST_ADMIN_FIRSTNAME }}
+          FIRST_ADMIN_LASTNAME: ${{ secrets.FIRST_ADMIN_LASTNAME }}
+        run: npm run db:seed
