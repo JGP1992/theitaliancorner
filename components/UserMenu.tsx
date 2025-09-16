@@ -23,7 +23,7 @@ export default function UserMenu() {
   return (
     <div className="relative">
       <button
-        onClick={() => setShowMenu(!showMenu)}
+        onClick={() => logout()}
         className="hover:text-gray-900 transition-colors font-medium flex items-center gap-2"
       >
         <LogOut className="h-4 w-4" />
@@ -52,18 +52,7 @@ export default function UserMenu() {
               </div>
             </div>
 
-            <div className="border-t">
-              <button
-                onClick={() => {
-                  setShowMenu(false);
-                  logout();
-                }}
-                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-              >
-                <LogOut className="h-4 w-4" />
-                Logout
-              </button>
-            </div>
+            <div className="border-t" />
           </div>
         </div>
       )}
