@@ -6,8 +6,6 @@ type FlavorRow = {
   id: string;
   name: string;
   unit?: string | null;
-  targetText?: string | null;
-  targetNumber?: number | null;
   defaultQuantity?: number | null;
   sortOrder?: number | null;
   isActive?: boolean;
@@ -45,8 +43,6 @@ export default function FlavorInlineEditor({ initialFlavors }: { initialFlavors:
           <tr>
             <th className="px-3 py-2 text-left">Name</th>
             <th className="px-3 py-2 text-left">Unit</th>
-            <th className="px-3 py-2 text-left">Target Text</th>
-            <th className="px-3 py-2 text-left">Target #</th>
             <th className="px-3 py-2 text-left">Default Qty</th>
             <th className="px-3 py-2 text-left">Sort</th>
             <th className="px-3 py-2 text-left">Active</th>
@@ -70,22 +66,6 @@ export default function FlavorInlineEditor({ initialFlavors }: { initialFlavors:
                     defaultValue={f.unit || ''}
                     className="w-24 border rounded px-2 py-1"
                     onBlur={(e) => save(f.id, { unit: e.currentTarget.value || null })}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    defaultValue={f.targetText || ''}
-                    className="w-56 border rounded px-2 py-1"
-                    onBlur={(e) => save(f.id, { targetText: e.currentTarget.value || null })}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="number"
-                    step="0.1"
-                    defaultValue={f.targetNumber ?? ''}
-                    className="w-24 border rounded px-2 py-1"
-                    onBlur={(e) => save(f.id, { targetNumber: e.currentTarget.value ? Number(e.currentTarget.value) : null })}
                   />
                 </td>
                 <td className="px-3 py-2">

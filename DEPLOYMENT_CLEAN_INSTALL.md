@@ -1,6 +1,6 @@
 ## Production deployment (clean install, no sample data)
 
-This guide explains how to deploy with an empty database (no demo stores/customers/items) so your client can set everything up from scratch.
+This guide explains how to deploy with an empty database (no demo stores/customers/items) so your instance can be set up from scratch.
 
 ### 1) Environment variables
 Required
@@ -8,12 +8,16 @@ Required
 - JWT_SECRET = a long, random secret for signing auth tokens
 - NODE_ENV = production
 
-Optional (recommended to create first admin during seed)
+Optional (to create first admin during seed)
 - SEED_MODE = minimal
 - FIRST_ADMIN_EMAIL = you@example.com
 - FIRST_ADMIN_PASSWORD = strong_password
 - FIRST_ADMIN_FIRSTNAME = YourName
 - FIRST_ADMIN_LASTNAME = YourSurname
+
+Optional (alternative bootstrap method)
+- BOOTSTRAP_TOKEN = some-long-random-string (used to allow registration beyond first user if ALLOW_PUBLIC_REGISTRATION is not set)
+- ALLOW_PUBLIC_REGISTRATION = false (default). Set true only if you want open registration in non-production.
 
 Notes
 - When SEED_MODE=minimal, the seed script creates only: permissions, roles, packaging options, and a first admin user if FIRST_ADMIN_* is set. No sample data is added.
@@ -21,30 +25,31 @@ Notes
 
 ### 2) Prepare the database
 - Run migrations (or push schema) against your production database URL:
-  - npx prisma db push
-  - or: npx prisma migrate deploy (if you manage migrations)
+  - npm run db:migrate:deploy
+  - or: npm run db:push (if not using migrations)
 
-### 3) Run a minimal seed
+### 3) Run a minimal seed (optional but recommended)
 - With your production env loaded, run:
-  - SEED_MODE=minimal npm run db:seed
+  - npm run db:seed:minimal
 - If you provided FIRST_ADMIN_* vars, a first admin user will be created.
 
-### 4) Start the app
-- Build: npm run build
-- Start: npm run start
+### 4) Build and start
+- npm run prisma:generate
+- npm run build
+- npm run start
 
 ### 5) First login and setup
-- Log in with FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD.
+- Log in using the FIRST_ADMIN_EMAIL and FIRST_ADMIN_PASSWORD you configured.
 - Create additional users/roles if needed.
-- Add stores, inventory items, customers, etc., via the admin interface.
+- Add stores, items, customers, etc., via the admin interface.
 
 ### 6) Safety checks
-- Ensure JWT_SECRET is unique per environment.
-- Confirm HTTPS is used in production so cookies (HttpOnly) are secure.
-- Verify /api/health loads and pages render.
+- Ensure JWT_SECRET is unique and strong.
+- Confirm HTTPS is used in production so cookies are secure.
+- Verify basic pages and endpoints respond (e.g., /api/auth/status).
 
-### 7) Optional: switching from demo to clean later
-- If you previously seeded demo data, back up first, then reset and reseed minimally:
-  - prisma migrate reset --force
-  - SEED_MODE=minimal npm run db:seed
-  - This will wipe data. Only do this on non-prod or during a planned maintenance window.
+### 7) Reset to clean data later (destructive!)
+- If you previously loaded demo data, back up first, then reset and reseed minimally:
+  - npm run db:reset
+  - npm run db:seed:minimal
+  - Only perform this in non-prod or during a planned maintenance window.

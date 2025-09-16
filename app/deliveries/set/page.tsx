@@ -67,7 +67,7 @@ export default function SetDeliveriesPage() {
                 return (
                   <div className="inline-flex flex-col items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-6 py-5">
                     <div className="text-amber-800 font-medium">You don’t have permission to set deliveries</div>
-                    <p className="text-xs text-amber-700">Ask an admin to grant “deliveries:read” or “deliveries:create”, or use an admin/manager account.</p>
+                    <p className="text-xs text-amber-700">Ask an admin to grant “deliveries:read” or “deliveries:create”, or sign in with an admin account.</p>
                   </div>
                 );
               }

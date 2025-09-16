@@ -55,8 +55,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { name, targetText, targetNumber, unit, sortOrder } = body;
+  const body = await request.json();
+  const { name, unit, sortOrder } = body;
 
     // Get or create the Gelato Flavors category
     let category = await prisma.category.findFirst({
@@ -72,8 +72,6 @@ export async function POST(request: NextRequest) {
     const flavor = await prisma.item.create({
       data: {
         name,
-        targetText,
-        targetNumber,
         unit,
         sortOrder: sortOrder || 0,
         isActive: true,
@@ -109,15 +107,13 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { id, name, targetText, targetNumber, unit, sortOrder, isActive } = body;
+  const body = await request.json();
+  const { id, name, unit, sortOrder, isActive } = body;
 
     const flavor = await prisma.item.update({
       where: { id },
       data: {
         name,
-        targetText,
-        targetNumber,
         unit,
         sortOrder,
         isActive

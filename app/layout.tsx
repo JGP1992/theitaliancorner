@@ -79,10 +79,10 @@ export default function RootLayout({
                     alt="TIC Icon"
                     className="h-6 w-6"
                   />
-                  <span>© {new Date().getFullYear()} TIC Gelato</span>
+                  <span>© {new Date().getFullYear()} © Webhoot</span>
                 </div>
                 <div className="text-gray-400">
-                  Powered by Webhoot.
+                  Made for The Italian Corner.
                 </div>
               </div>
             </footer>

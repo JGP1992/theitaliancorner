@@ -3,8 +3,9 @@
 import '../globals.css';
 
 // Set recovery link 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useAuth } from '@/components/AuthContext';
 import QuickDelivery from './quick-delivery';
 import EditDeliveryPlan from './edit-delivery-plan';
 
@@ -232,10 +233,13 @@ async function getFactoryData(): Promise<FactoryData> {
 }
 
 export default function FactoryPage() {
+  const { hasRole } = useAuth();
   const [data, setData] = useState<FactoryData | null>(null);
   const [editingPlan, setEditingPlan] = useState<DeliveryPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     getFactoryData()
@@ -291,6 +295,26 @@ export default function FactoryPage() {
       // no-op
     }
   };
+
+  // Close the "More" menu on outside click or Escape
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!isMoreOpen) return;
+      const target = e.target as Node | null;
+      if (moreMenuRef.current && target && !moreMenuRef.current.contains(target)) {
+        setIsMoreOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setIsMoreOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isMoreOpen]);
 
   const refreshData = async () => {
     setIsLoading(true);
@@ -373,61 +397,62 @@ export default function FactoryPage() {
                 <h1 className="text-3xl font-bold text-gray-900">Factory Dashboard</h1>
                 <p className="mt-2 text-gray-600">Monitor stocktakes, manage deliveries, and track inventory</p>
               </div>
-              <div className="flex space-x-4">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <Link
                   href="/factory/production"
-                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors text-sm font-medium"
                 >
                   Today’s Production
                 </Link>
                 <Link
-                  href="/admin/production-schedule"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
-                >
-                  Schedule Production
-                </Link>
-                <Link
                   href="/factory/intake"
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
                 >
                   Factory Intake
                 </Link>
                 <Link
-                  href="/factory/master-stocktake"
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors"
+                  href="/admin/production-schedule"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
                 >
-                  Master Stocktake
+                  Schedule Production
                 </Link>
-                <Link
-                  href={`/daily-deliveries?date=${new Date().toISOString().slice(0, 10)}`}
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                >
-                  Daily Deliveries
-                </Link>
-                <Link
-                  href="/staff-deliveries"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  Staff View
-                </Link>
-                <Link
-                  href="/recipes"
-                  className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 transition-colors"
-                >
-                  👨‍🍳 Recipe Builder
-                </Link>
-                <Link
-                  href="/stock-ordering"
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-                >
-                  Stock Ordering
-                </Link>
-                <Link
-                  href="/orders"
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                >
-                  Orders & Receipts
-                </Link>
+                <div className="relative" ref={moreMenuRef}>
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={isMoreOpen}
+                    onClick={() => setIsMoreOpen(v => !v)}
+                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm font-medium flex items-center gap-1"
+                  >
+                    More
+                    <svg className={`w-4 h-4 transition-transform ${isMoreOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.188l3.71-3.957a.75.75 0 111.08 1.04l-4.24 4.52a.75.75 0 01-1.08 0l-4.24-4.52a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                  {isMoreOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1"
+                    >
+                      {/* Master Stocktake link moved to Advanced section */}
+                      <Link href={`/daily-deliveries?date=${new Date().toISOString().slice(0, 10)}`} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" role="menuitem">
+                        Daily Deliveries
+                      </Link>
+                      <Link href="/staff-deliveries" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" role="menuitem">
+                        Staff View
+                      </Link>
+                      <Link href="/recipes" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" role="menuitem">
+                        👨‍🍳 Recipe Builder
+                      </Link>
+                      <Link href="/stock-ordering" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" role="menuitem">
+                        Stock Ordering
+                      </Link>
+                      <Link href="/orders" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" role="menuitem">
+                        Orders & Receipts
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1070,6 +1095,26 @@ export default function FactoryPage() {
             <p className="text-gray-600 mb-6">This tool has moved to the Set Deliveries page.</p>
             <Link href="/deliveries/set" className="inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Go to Set Deliveries →</Link>
           </div>
+          )}
+
+          {/* Advanced section (System Admin only) */}
+          {activeTab === 'overview' && hasRole?.('system_admin') && (
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Advanced</h2>
+              </div>
+              <div className="bg-white rounded-lg shadow-sm border p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">Factory Master Stocktake</p>
+                    <p className="text-sm text-gray-600">Set or reset the factory baseline after a full physical count.</p>
+                  </div>
+                  <Link href="/factory/master-stocktake" className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium">
+                    Open
+                  </Link>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

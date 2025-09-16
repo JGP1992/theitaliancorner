@@ -3,12 +3,14 @@
 import '../../globals.css';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useAuth } from '@/components/AuthContext';
 import ItemSelector from '../item-selector';
 
 type Store = { id: string; name: string; slug: string };
 type SelectedItem = { id: string; name: string; quantity: number; unit?: string };
 
 export default function FactoryIntakePage() {
+  const { hasRole } = useAuth();
   const [stores, setStores] = useState<Store[]>([]);
   const [storeSlug, setStoreSlug] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -91,8 +93,8 @@ export default function FactoryIntakePage() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Factory Intake</h1>
-            <p className="text-gray-600 mt-1">Record stock coming into the Factory (ingredients, supplies, etc.).</p>
+            <h1 className="text-2xl font-bold text-gray-900">Record Incoming Stock (Factory)</h1>
+            <p className="text-gray-600 mt-1">Quickly log items received at the Factory. This adds movements since the last Master Snapshot and does not replace it.</p>
           </div>
           <div className="flex gap-2">
             <Link href="/factory" className="px-3 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Back to Factory</Link>
@@ -100,6 +102,13 @@ export default function FactoryIntakePage() {
         </div>
 
         <div className="bg-white rounded-lg shadow-sm border p-6 space-y-6">
+          <div className="rounded-md border border-blue-200 bg-blue-50 text-blue-800 text-sm p-3">
+            Tip: Use {hasRole?.('system_admin') ? (
+              <Link href="/factory/master-stocktake" className="underline">Master Inventory Snapshot</Link>
+            ) : (
+              <span className="font-medium">Master Inventory Snapshot</span>
+            )} for a full, authoritative count. Use this page for day-to-day receipts.
+          </div>
           {/* Store and date */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>

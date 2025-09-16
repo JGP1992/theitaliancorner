@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
         item: { include: { category: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
         assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
+        packagingOption: true,
       },
       orderBy: [{ date: 'asc' }, { status: 'asc' }, { createdAt: 'desc' }],
     });
@@ -51,9 +52,22 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { date, itemId, quantity, unit, notes, assignedToUserId } = body || {};
+  const { date, itemId, quantity, unit, notes, assignedToUserId, packagingOptionId } = body || {};
     if (!date || !itemId || typeof quantity !== 'number' || quantity <= 0) {
       return NextResponse.json({ error: 'date, itemId, and quantity are required' }, { status: 400 });
+    }
+
+    const allowedUnits = new Set(['tub', 'tubs', 'tray', 'trays', 'kg', 'l', 'units']);
+    let finalUnit = typeof unit === 'string' && unit.trim() ? unit.trim().toLowerCase() : '';
+    if (finalUnit && !allowedUnits.has(finalUnit)) {
+      return NextResponse.json({ error: `Invalid unit. Allowed: ${Array.from(allowedUnits).join(', ')}` }, { status: 400 });
+    }
+    if (!finalUnit) {
+      // Try infer from item category: default to tubs for gelato-like categories
+      const item = await (prisma as any).item.findUnique({ where: { id: itemId }, include: { category: true } });
+      const catName = item?.category?.name?.toLowerCase() || '';
+      if (catName.includes('gelato') || catName.includes('flavor')) finalUnit = 'tubs';
+      else finalUnit = 'units';
     }
 
   const created = await (prisma as any).productionTask.create({
@@ -61,15 +75,17 @@ export async function POST(req: NextRequest) {
         date: new Date(date),
         itemId,
         quantity,
-        unit: unit || 'units',
+        unit: finalUnit,
         notes: notes || null,
         createdByUserId: user.id,
         assignedToUserId: assignedToUserId || null,
+        packagingOptionId: packagingOptionId || null,
       },
       include: {
         item: { include: { category: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
         assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
+        packagingOption: true,
       },
     });
 

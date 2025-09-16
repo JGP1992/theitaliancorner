@@ -18,103 +18,55 @@ interface CategoryWithItems {
 }
 
 export default async function StorePage({ params }: any) {
-  const { slug } = params;
+  const { slug } = await params; // ensure awaited per Next.js dynamic route requirements
   const store = await prisma.store.findUnique({ where: { slug } });
   if (!store) return <div>Store not found</div>;
-  // Fetch gelato delivery items for this store efficiently (flat list), limited to a reasonable window
-  const windowDays = 90; // look back ~3 months for delivered flavors (perf)
-  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  const gelatoDeliveries = await prisma.deliveryItem.findMany({
-    where: {
-      plan: {
-        storeId: store.id,
-        status: { in: ['CONFIRMED', 'SENT'] },
-        date: { gte: since },
-      },
-      item: {
-        isActive: true,
-        category: { name: 'Gelato Flavors' },
-      },
-    },
-    select: {
-      quantity: true,
-      plan: { select: { date: true } },
-      item: {
-        select: {
-          id: true,
-          name: true,
-          isActive: true,
-          category: { select: { name: true } },
-        },
-      },
-    },
-    orderBy: { plan: { date: 'desc' } },
+  // Load persisted preferences (JSON)
+  const preferences = (store as any).preferences as { categoryVisibility?: Record<string, boolean> } | null;
+  const visibleByCategoryId = preferences?.categoryVisibility || {};
+  // Drive categories directly from store inventory configuration, merging store-specific targets
+  const storeInventory = await prisma.storeInventory.findMany({
+    where: { storeId: store.id, isActive: true },
+    include: { item: { include: { category: true } } },
+    orderBy: [
+      { item: { category: { sortOrder: 'asc' } } },
+      { item: { sortOrder: 'asc' } },
+    ],
   });
 
-  // Get all active items grouped by category for store stocktake
-  const allCategories: CategoryWithItems[] = await prisma.category.findMany({
-    include: {
-      items: {
-        where: { isActive: true },
-        orderBy: { name: 'asc' }
-      }
-    },
-    orderBy: { sortOrder: 'asc' }
+  // Latest stocktake quantities to prefill defaults
+  const latest = await prisma.stocktake.findFirst({
+    where: { storeId: store.id },
+    orderBy: { date: 'desc' },
+    include: { items: true },
   });
-
-  // Extract ALL unique gelato flavors that have been delivered to this store
-  const deliveredGelatoFlavors = new Map<string, any>();
-  for (const di of gelatoDeliveries) {
-    const item = di.item;
-    const planDate = di.plan?.date ? new Date(di.plan.date) : null;
-    if (!item || item.category?.name !== 'Gelato Flavors') continue;
-    if (!deliveredGelatoFlavors.has(item.id)) {
-      deliveredGelatoFlavors.set(item.id, {
-        id: item.id,
-        name: item.name,
-        isActive: item.isActive,
-        category: item.category,
-        firstDelivered: planDate,
-        lastDelivered: planDate,
-        totalDelivered: di.quantity || 0,
-        deliveryCount: 1,
-      });
-    } else {
-      const existing = deliveredGelatoFlavors.get(item.id);
-      if (planDate) {
-        existing.firstDelivered = existing.firstDelivered ? new Date(Math.min(existing.firstDelivered.getTime(), planDate.getTime())) : planDate;
-        existing.lastDelivered = existing.lastDelivered ? new Date(Math.max(existing.lastDelivered.getTime(), planDate.getTime())) : planDate;
-      }
-      existing.totalDelivered += di.quantity || 0;
-      existing.deliveryCount += 1;
-    }
+  const latestMap = new Map<string, number | null>();
+  if (latest) {
+    for (const si of latest.items) latestMap.set(si.itemId, si.quantity ?? null);
   }
 
-  // Convert delivered gelato flavors to array
-  const availableGelatoFlavors = Array.from(deliveredGelatoFlavors.values())
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  // Build categories for stocktake - include all categories except Ingredients (factory-specific)
-  const stocktakeCategories = allCategories
-    .filter((cat: CategoryWithItems) => cat.name !== 'Ingredients') // Exclude factory ingredients
-    .map((category: CategoryWithItems) => {
-      if (category.name === 'Gelato Flavors') {
-        // For gelato flavors, only include those that have been delivered
-        return {
-          id: category.id,
-          name: category.name,
-          items: availableGelatoFlavors
-        };
-      } else {
-        // For other categories, include all active items
-        return {
-          id: category.id,
-          name: category.name,
-          items: category.items
-        };
-      }
-    })
-    .filter((category) => category.items.length > 0); // Only include categories with items
+  // Group by category
+  const byCategory: Record<string, { id: string; name: string; items: any[] }> = {};
+  for (const si of storeInventory) {
+    const cat = si.item.category;
+    if (!byCategory[cat.id]) byCategory[cat.id] = { id: cat.id, name: cat.name, items: [] };
+    byCategory[cat.id].items.push({
+      id: si.item.id,
+      name: si.item.name,
+      targetNumber: si.targetQuantity ?? si.item.targetNumber ?? null,
+      targetText: si.targetText ?? si.item.targetText ?? null,
+      unit: si.unit ?? si.item.unit ?? null,
+      // Prefill metadata (can be used by client if desired)
+      lastQuantity: latestMap.get(si.itemId) ?? undefined,
+    });
+  }
+  // Apply category visibility if configured; default to visible when not specified
+  const stocktakeCategories = Object.values(byCategory)
+    .filter((c) => c.items.length > 0)
+    .filter((c) => {
+      const flag = visibleByCategoryId[c.id];
+      return flag === undefined ? true : !!flag;
+    });
 
   return (
     <div>

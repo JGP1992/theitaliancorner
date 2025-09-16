@@ -19,6 +19,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    // Parse optional baselineMode (auto | master | latest)
+    const { searchParams } = new URL(req.url);
+    const baselineModeParam = searchParams.get('baselineMode');
+    const baselineMode: 'auto' | 'master' | 'latest' = (baselineModeParam === 'master' || baselineModeParam === 'latest') ? baselineModeParam : 'auto';
+
     // Get all items with their categories
     const items = await prisma.item.findMany({
       where: { isActive: true },
@@ -38,49 +43,91 @@ export async function GET(req: NextRequest) {
     let latestStocktakes: Array<any> = [];
 
     if (factoryStore) {
-      const master = await prisma.stocktake.findFirst({
-        where: ({ storeId: factoryStore.id, isMaster: true } as any),
-        include: {
-          items: {
-            include: { item: true }
-          },
-          store: true,
-        },
-        orderBy: { date: 'desc' },
-      });
-      if (master) {
-        factoryMaster = master as any;
-        baseline = 'master';
-        baselineDate = master.date?.toISOString?.() ?? null;
+      if (baselineMode !== 'latest') {
+        // attempt master usage / creation (auto or master mode)
+        let master = await prisma.stocktake.findFirst({
+          where: ({ storeId: factoryStore.id, isMaster: true } as any),
+          include: { items: { include: { item: true } }, store: true },
+          orderBy: { date: 'desc' },
+        });
+        if (master) {
+          factoryMaster = master as any;
+          baseline = 'master';
+          baselineDate = master.date?.toISOString?.() ?? null;
+        } else if (baselineMode === 'master' || baselineMode === 'auto') {
+          // Only auto-create if user explicitly wants master or auto mode (not latest)
+            latestStocktakes = await prisma.stocktake.findMany({
+              include: { items: { include: { item: true } }, store: true },
+              orderBy: { date: 'desc' },
+              take: 50
+            });
+            const baselineMap: Record<string, number> = {};
+            if (latestStocktakes.length > 0) {
+              for (const st of latestStocktakes) {
+                for (const sti of st.items) {
+                  if (baselineMap[sti.itemId] == null && typeof sti.quantity === 'number') baselineMap[sti.itemId] = sti.quantity;
+                }
+              }
+            }
+            for (const it of items) if (baselineMap[it.id] == null) baselineMap[it.id] = 0;
+            try {
+              master = await prisma.stocktake.create({
+                data: {
+                  storeId: factoryStore.id,
+                  date: new Date(),
+                  // @ts-ignore
+                  isMaster: true,
+                  notes: 'Auto-created initial master snapshot',
+                  submittedByUserId: (user as any).id ?? null,
+                  items: { create: Object.entries(baselineMap).map(([itemId, quantity]) => ({ itemId, quantity })) }
+                } as any,
+                include: { items: { include: { item: true } }, store: true }
+              });
+              if (master) {
+                factoryMaster = master as any;
+                baseline = 'master';
+                baselineDate = (master as any).date ? new Date((master as any).date).toISOString() : null;
+              }
+            } catch (e) {
+              console.warn('Failed auto-create master snapshot:', e);
+            }
+        }
       }
     }
 
-    if (!factoryMaster) {
+    if ((!factoryMaster || baselineMode === 'latest') && latestStocktakes.length === 0) {
       latestStocktakes = await prisma.stocktake.findMany({
-        include: {
-          items: {
-            include: { item: true }
-          },
-          store: true
-        },
+        include: { items: { include: { item: true } }, store: true },
         orderBy: { date: 'desc' },
-        take: 50 // Get recent stocktakes
+        take: 50
       });
     }
 
-    // Get incoming supplies (pending orders)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // If baselineMode explicitly latest, override baseline selection
+    if (baselineMode === 'latest') {
+      factoryMaster = null as any; // ignore master even if present
+      baseline = 'latest';
+      if (latestStocktakes.length > 0) baselineDate = latestStocktakes[0].date.toISOString();
+    }
+
+    // Date range (defaults to today)
+  const fromParam = searchParams.get('from');
+    const toParam = searchParams.get('to');
+    const from = fromParam ? new Date(fromParam) : new Date();
+    if (!fromParam) from.setHours(0,0,0,0); // ensure start of day when defaulting
+    const to = toParam ? new Date(toParam) : new Date(from.getTime());
+    // inclusive end-of-day: set to end of 'to' day
+    to.setHours(23,59,59,999);
+
+    const dateRange = { from: from.toISOString(), to: to.toISOString() };
+    const partialWindow = baselineDate ? (new Date(baselineDate) > from) : false;
+
+    // Build day boundaries for queries (gte from, lt to+1ms handled by setting end-of-day)
 
     const incomingOrders = await prisma.order.findMany({
       where: {
         status: { in: ['PENDING', 'CONFIRMED'] },
-        expectedDate: {
-          gte: today,
-          lt: tomorrow
-        }
+        expectedDate: { gte: from, lte: to }
       },
       include: {
         items: {
@@ -89,14 +136,11 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // Get outgoing deliveries (confirmed delivery plans for today)
+    // Get outgoing deliveries (confirmed delivery plans in range)
     const outgoingDeliveries = await prisma.deliveryPlan.findMany({
       where: {
         status: 'CONFIRMED',
-        date: {
-          gte: today,
-          lt: tomorrow
-        }
+        date: { gte: from, lte: to }
       },
       include: {
         items: {
@@ -105,13 +149,10 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // Get production usage for today
+    // Get production usage in range
     const todaysProductions = await prisma.production.findMany({
       where: {
-        producedAt: {
-          gte: today,
-          lt: tomorrow
-        }
+        producedAt: { gte: from, lte: to }
       },
       include: {
         ingredients: {
@@ -130,46 +171,47 @@ export async function GET(req: NextRequest) {
 
     // Calculate inventory data for each item
     const inventoryData = items.map((item: { id: string; name: string; category: { name: string }; targetNumber: number | null; unit: string | null }) => {
-      // Get current stock from Factory master stocktake if available, else from latest stocktakes across stores
-      let currentStock = 0;
+      // Baseline (master or latest) quantity
+      let baselineQuantity = 0;
       if (factoryMaster && masterMap[item.id] != null) {
-        currentStock = masterMap[item.id] || 0;
+        baselineQuantity = masterMap[item.id] || 0;
       } else if (latestStocktakes.length > 0) {
         const latestStocktakeItem = latestStocktakes
           .flatMap((st: { items: { itemId: string; quantity: number | null }[] }) => st.items)
           .find((sti: { itemId: string; quantity: number | null }) => sti.itemId === item.id);
-        currentStock = latestStocktakeItem?.quantity || 0;
+        baselineQuantity = latestStocktakeItem?.quantity || 0;
       }
 
-      // Calculate incoming quantity
+      // Movement components
       const incomingQuantity = incomingOrders
         .flatMap((order: { items: { itemId: string; quantity: number }[] }) => order.items)
         .filter((orderItem: { itemId: string; quantity: number }) => orderItem.itemId === item.id)
         .reduce((sum: number, orderItem: { itemId: string; quantity: number }) => sum + orderItem.quantity, 0);
 
-      // Calculate outgoing quantity
       const outgoingQuantity = outgoingDeliveries
         .flatMap((delivery: { items: { itemId: string; quantity: number }[] }) => delivery.items)
         .filter((deliveryItem: { itemId: string; quantity: number }) => deliveryItem.itemId === item.id)
         .reduce((sum: number, deliveryItem: { itemId: string; quantity: number }) => sum + deliveryItem.quantity, 0);
 
-      // Calculate production usage
       const productionUsage = todaysProductions
         .flatMap((production: { ingredients: { itemId: string; quantityUsed: number }[] }) => production.ingredients)
         .filter((ingredient: { itemId: string; quantityUsed: number }) => ingredient.itemId === item.id)
         .reduce((sum: number, ingredient: { itemId: string; quantityUsed: number }) => sum + ingredient.quantityUsed, 0);
 
-      // Determine status based on current stock vs target
+      const netMovement = incomingQuantity - outgoingQuantity + productionUsage;
+      const derivedCurrent = baselineQuantity + netMovement;
+
+      // Determine status based on derived current vs target
       let status: 'low' | 'normal' | 'high' | 'critical' = 'normal';
       const targetStock = item.targetNumber || 10; // Default target if not set
 
-      if (currentStock === 0) {
+      if (derivedCurrent === 0) {
         status = 'critical';
-      } else if (currentStock < targetStock * 0.25) {
+      } else if (derivedCurrent < targetStock * 0.25) {
         status = 'critical';
-      } else if (currentStock < targetStock * 0.5) {
+      } else if (derivedCurrent < targetStock * 0.5) {
         status = 'low';
-      } else if (currentStock > targetStock * 2) {
+      } else if (derivedCurrent > targetStock * 2) {
         status = 'high';
       }
 
@@ -177,11 +219,13 @@ export async function GET(req: NextRequest) {
         id: item.id,
         name: item.name,
         category: item.category.name,
-        currentStock,
+        baselineQuantity,
+        derivedCurrent,
         unit: item.unit || 'units',
         incoming: incomingQuantity,
         outgoing: outgoingQuantity,
         production: productionUsage,
+        netMovement,
         targetStock,
         status
       };
@@ -190,19 +234,32 @@ export async function GET(req: NextRequest) {
     // Calculate summary statistics
     const summary = {
       totalItems: inventoryData.length,
-      lowStockItems: inventoryData.filter((item: { status: string }) => item.status === 'low').length,
-      outOfStockItems: inventoryData.filter((item: { status: string }) => item.status === 'critical').length,
-      incomingToday: inventoryData.reduce((sum: number, item: { incoming: number }) => sum + item.incoming, 0),
-      outgoingToday: inventoryData.reduce((sum: number, item: { outgoing: number }) => sum + item.outgoing, 0),
-      productionToday: inventoryData.reduce((sum: number, item: { production: number }) => sum + item.production, 0)
+      lowStockItems: inventoryData.filter((item: any) => item.status === 'low').length,
+      outOfStockItems: inventoryData.filter((item: any) => item.status === 'critical').length,
+      incomingToday: inventoryData.reduce((sum: number, item: any) => sum + item.incoming, 0),
+      outgoingToday: inventoryData.reduce((sum: number, item: any) => sum + item.outgoing, 0),
+      productionToday: inventoryData.reduce((sum: number, item: any) => sum + item.production, 0),
+      dateRange
+    };
+
+    const movementSummary = {
+      baselineTotal: inventoryData.reduce((sum: number, item: any) => sum + item.baselineQuantity, 0),
+      netMovementTotal: inventoryData.reduce((sum: number, item: any) => sum + item.netMovement, 0),
+      derivedCurrentTotal: inventoryData.reduce((sum: number, item: any) => sum + item.derivedCurrent, 0),
+      incomingTotal: summary.incomingToday,
+      outgoingTotal: summary.outgoingToday,
+      productionTotal: summary.productionToday
     };
 
     return NextResponse.json({
       inventory: inventoryData,
       summary,
       baseline,
-      baselineDate
-    });
+      baselineDate,
+      movementSummary,
+      dateRange,
+      partialWindow
+    , baselineMode });
   } catch (error) {
     console.error('Error fetching inventory dashboard data:', error);
     return NextResponse.json(

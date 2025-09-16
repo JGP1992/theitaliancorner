@@ -11,6 +11,7 @@ type Category = {
     targetNumber: number | null;
     targetText: string | null;
     unit: string | null;
+    lastQuantity?: number;
     firstDelivered?: Date;
     lastDelivered?: Date;
     totalDelivered?: number;
@@ -94,6 +95,22 @@ export default function StocktakeForm({ storeSlug, categories }: { storeSlug: st
   }, [gelatoQuickMode, storeSlug]);
 
   const itemsFlat = useMemo(() => categories.flatMap((c) => c.items), [categories]);
+
+  // Prefill values when categories change and we have lastQuantity metadata
+  useEffect(() => {
+    if (!categories?.length) return;
+    setValues((prev) => {
+      const next = { ...prev };
+      for (const c of categories) {
+        for (const it of c.items) {
+          if (next[it.id]?.quantity == null && typeof it.lastQuantity === 'number') {
+            next[it.id] = { ...(next[it.id] || {}), quantity: it.lastQuantity };
+          }
+        }
+      }
+      return next;
+    });
+  }, [categories]);
 
   function updateQuantity(itemId: string, q: string) {
     const num = q === '' ? undefined : Number(q);
@@ -299,6 +316,9 @@ export default function StocktakeForm({ storeSlug, categories }: { storeSlug: st
                                 </span>
                               </div>
                             ) : null}
+                            {typeof item.lastQuantity === 'number' && (
+                              <div className="mt-0.5 text-[11px] text-gray-500">Last: {item.lastQuantity}{item.unit ? ` ${item.unit}` : ''}</div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             <button onClick={() => setQ(Math.max(0, (v || 0) - step))} className="w-8 h-8 rounded border text-lg hover:bg-gray-50" aria-label="decrease">−</button>

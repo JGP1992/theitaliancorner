@@ -16,12 +16,14 @@ This app uses Next.js 15, Prisma, and PostgreSQL. Auth is JWT via HttpOnly cooki
 ### 4) Install + migrate + seed
 - Install deps: npm install
 - Push schema: npm run db:push
-- Seed data: npm run db:seed
+- Seed data (local demo): npm run db:seed
+- Clean install (no sample data): npm run db:seed:minimal (optionally set FIRST_ADMIN_* to create your first admin)
 
 ### 5) Run dev
 - Start: npm run dev
 - Health: http://localhost:3000/api/health
-- Login: admin@stocktake.com / admin123
+- Login (demo seed): admin@stocktake.com / admin123
+- For clean install: set FIRST_ADMIN_* and use those credentials, or visit /first-run to create the first admin.
 
 ### Vercel deployment
 1) Create a Postgres DB (e.g., Neon, Supabase, Railway) and get a DATABASE_URL (ssl required).
@@ -30,7 +32,7 @@ This app uses Next.js 15, Prisma, and PostgreSQL. Auth is JWT via HttpOnly cooki
 	- JWT_SECRET = strong random secret
 	- NODE_ENV = production
 3) Deploy. On first deploy, run a one-time migration via Vercel CLI or run a job locally:
-	- Locally: set DATABASE_URL to prod DB, then run `npm run db:push` and `npm run db:seed` once.
+	- Locally: set DATABASE_URL to prod DB, then run `npm run db:migrate:deploy`. If you want a clean install, run `npm run db:seed:minimal` (with FIRST_ADMIN_*). Avoid full demo seeding in production.
 4) Visit your site. Health at /api/health.
 
 Notes

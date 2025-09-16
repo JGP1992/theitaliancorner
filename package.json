@@ -7,13 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev --name init",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset --force",
   "db:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
   "db:seed:minimal": "SEED_MODE=minimal ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts",
     "db:studio": "prisma studio",
+    "backfill:packaging-labels": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/backfill-packaging-labels.ts",
     "backup": "node scripts/backup-restore.js backup",
+    "reset:production-data": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/reset-production-data.ts",
     "backup:list": "node scripts/backup-restore.js list",
     "backup:restore": "node scripts/backup-restore.js restore",
     "backup:cleanup": "node scripts/backup-restore.js cleanup",
@@ -25,7 +29,8 @@
     "backup:health": "node scripts/backup-scheduler.js health",
     "validate:data": "node scripts/data-validator.js check",
     "validate:backup": "node scripts/data-validator.js backup",
-    "validate:report": "node scripts/data-validator.js report"
+    "validate:report": "node scripts/data-validator.js report",
+    "smoke:rbac": "node scripts/rbac-smoke.js"
   },
   "dependencies": {
     "@prisma/client": "^6.16.0",

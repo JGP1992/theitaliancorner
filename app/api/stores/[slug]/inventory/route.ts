@@ -53,7 +53,29 @@ export async function GET(
       ],
     });
 
-    return NextResponse.json({ inventory });
+    // Find latest stocktake for this store to expose current quantities
+    const latestStocktake = await prisma.stocktake.findFirst({
+      where: { storeId: store.id },
+      orderBy: { date: 'desc' },
+      include: { items: true },
+    });
+
+    const qtyMap = new Map<string, number | null>();
+    if (latestStocktake) {
+      for (const si of latestStocktake.items) {
+        qtyMap.set(si.itemId, si.quantity ?? null);
+      }
+    }
+
+    const inventoryWithCurrent = inventory.map((inv) => ({
+      ...inv,
+      currentQuantity: qtyMap.has(inv.itemId) ? qtyMap.get(inv.itemId) : null,
+    }));
+
+    return NextResponse.json({
+      inventory: inventoryWithCurrent,
+      lastStocktakeDate: latestStocktake?.date?.toISOString() || null,
+    });
   } catch (error) {
     console.error('Error fetching store inventory:', error);
     return NextResponse.json(

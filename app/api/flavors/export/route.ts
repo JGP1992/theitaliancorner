@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const user = AuthService.verifyToken(token);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!AuthService.hasAnyRole(user, ['admin', 'manager'])) {
+    if (!AuthService.hasAnyRole(user, ['admin', 'system_admin'])) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -17,12 +17,10 @@ export async function GET(req: NextRequest) {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
     });
 
-    const header = ['name','unit','targetText','targetNumber','sortOrder','isActive','defaultQuantity'];
+    const header = ['name','unit','sortOrder','isActive','defaultQuantity'];
     const rows = flavors.map((f: any) => [
       escapeCsv(f.name),
       escapeCsv(f.unit || ''),
-      escapeCsv(f.targetText || ''),
-      f.targetNumber ?? '',
       f.sortOrder ?? 0,
       f.isActive ? 1 : 0,
       f.defaultQuantity ?? ''
@@ -33,7 +31,7 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="flavors-template.csv"`
+        'Content-Disposition': `attachment; filename="flavors.csv"`
       }
     });
   } catch (error) {

@@ -3,7 +3,7 @@ import { prisma } from '@/app/lib/prisma';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { AuthService } from '../../lib/auth';
-import DeleteButton from './delete-button';
+// DeleteButton is no longer used here to avoid passing server actions to client components
 
 export default async function AdminPage() {
   // Check authentication on server side
@@ -19,8 +19,11 @@ export default async function AdminPage() {
     redirect('/login');
   }
 
-  // Check if user has admin or manager role
-  if (!AuthService.hasRole(user, 'admin') && !AuthService.hasRole(user, 'manager')) {
+  // Check if user has admin or system_admin role
+  if (
+    !AuthService.hasRole(user, 'admin') &&
+    !AuthService.hasRole(user, 'system_admin')
+  ) {
     redirect('/');
   }
 
@@ -202,12 +205,12 @@ export default async function AdminPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{store.slug}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{store.apiKey}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <DeleteButton
-                            id={store.id}
-                            type="store"
-                            name={store.name}
-                            onDelete={deleteStore}
-                          />
+                          <form action={deleteStoreAction}>
+                            <input type="hidden" name="id" value={store.id} />
+                            <button className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                              Delete
+                            </button>
+                          </form>
                         </td>
                       </tr>
                     ))}
@@ -237,12 +240,12 @@ export default async function AdminPage() {
                       <tr key={category.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{category.name}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <DeleteButton
-                            id={category.id}
-                            type="category"
-                            name={category.name}
-                            onDelete={deleteCategory}
-                          />
+                          <form action={deleteCategoryAction}>
+                            <input type="hidden" name="id" value={category.id} />
+                            <button className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                              Delete
+                            </button>
+                          </form>
                         </td>
                       </tr>
                     ))}
@@ -278,12 +281,12 @@ export default async function AdminPage() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.targetText || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.unit || '-'}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <DeleteButton
-                              id={item.id}
-                              type="item"
-                              name={item.name}
-                              onDelete={deleteItem}
-                            />
+                            <form action={deleteItemAction}>
+                              <input type="hidden" name="id" value={item.id} />
+                              <button className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                                Delete
+                              </button>
+                            </form>
                           </td>
                         </tr>
                       ))}
@@ -317,12 +320,12 @@ export default async function AdminPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.category.name}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.targetText || '-'}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <DeleteButton
-                            id={item.id}
-                            type="item"
-                            name={item.name}
-                            onDelete={deleteItem}
-                          />
+                          <form action={deleteItemAction}>
+                            <input type="hidden" name="id" value={item.id} />
+                            <button className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                              Delete
+                            </button>
+                          </form>
                         </td>
                       </tr>
                     ))}
@@ -358,12 +361,12 @@ export default async function AdminPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{customer.contactName || '-'}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{customer.phone || '-'}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <DeleteButton
-                            id={customer.id}
-                            type="customer"
-                            name={customer.name}
-                            onDelete={deleteCustomer}
-                          />
+                          <form action={deleteCustomerAction}>
+                            <input type="hidden" name="id" value={customer.id} />
+                            <button className="inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors">
+                              Delete
+                            </button>
+                          </form>
                         </td>
                       </tr>
                     ))}
@@ -378,6 +381,35 @@ export default async function AdminPage() {
   );
 }
 
+// Server action wrappers for deletions (consume FormData from <form action={...}>)
+async function deleteStoreAction(formData: FormData) {
+  'use server';
+  const id = String(formData.get('id'));
+  await deleteStore(id);
+  redirect('/admin');
+}
+
+async function deleteCategoryAction(formData: FormData) {
+  'use server';
+  const id = String(formData.get('id'));
+  await deleteCategory(id);
+  redirect('/admin');
+}
+
+async function deleteItemAction(formData: FormData) {
+  'use server';
+  const id = String(formData.get('id'));
+  await deleteItem(id);
+  redirect('/admin');
+}
+
+async function deleteCustomerAction(formData: FormData) {
+  'use server';
+  const id = String(formData.get('id'));
+  await deleteCustomer(id);
+  redirect('/admin');
+}
+
 async function addStore(formData: FormData) {
   'use server';
 
@@ -389,7 +421,11 @@ async function addStore(formData: FormData) {
   }
 
   const user = AuthService.verifyToken(token);
-  if (!user || (!AuthService.hasRole(user, 'admin') && !AuthService.hasRole(user, 'manager'))) {
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
     redirect('/login');
   }
 
@@ -416,7 +452,11 @@ async function addItem(formData: FormData) {
   }
 
   const user = AuthService.verifyToken(token);
-  if (!user || (!AuthService.hasRole(user, 'admin') && !AuthService.hasRole(user, 'manager'))) {
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
     redirect('/login');
   }
 
@@ -431,6 +471,21 @@ async function addItem(formData: FormData) {
 
 async function addIngredient(formData: FormData) {
   'use server';
+  // Check authentication
+  const cookieStore = await cookies();
+  const token = cookieStore.get('authToken')?.value;
+  if (!token) {
+    redirect('/login');
+  }
+
+  const user = AuthService.verifyToken(token);
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
+    redirect('/login');
+  }
   const name = String(formData.get('name'));
   const target = String(formData.get('target') || '');
   const unit = String(formData.get('unit') || '');
@@ -459,6 +514,21 @@ async function addIngredient(formData: FormData) {
 
 async function addCustomer(formData: FormData) {
   'use server';
+  // Check authentication
+  const cookieStore = await cookies();
+  const token = cookieStore.get('authToken')?.value;
+  if (!token) {
+    redirect('/login');
+  }
+
+  const user = AuthService.verifyToken(token);
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
+    redirect('/login');
+  }
   const name = String(formData.get('name'));
   const type = String(formData.get('type') || 'restaurant');
   const contactName = String(formData.get('contactName') || '');
@@ -476,6 +546,21 @@ async function addCustomer(formData: FormData) {
 
 async function deleteStore(id: string) {
   'use server';
+  // Check authentication
+  const cookieStore = await cookies();
+  const token = cookieStore.get('authToken')?.value;
+  if (!token) {
+    redirect('/login');
+  }
+
+  const user = AuthService.verifyToken(token);
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
+    redirect('/login');
+  }
   try {
     await prisma.store.delete({ where: { id } });
   } catch (error) {
@@ -486,6 +571,21 @@ async function deleteStore(id: string) {
 
 async function deleteCategory(id: string) {
   'use server';
+  // Check authentication
+  const cookieStore = await cookies();
+  const token = cookieStore.get('authToken')?.value;
+  if (!token) {
+    redirect('/login');
+  }
+
+  const user = AuthService.verifyToken(token);
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
+    redirect('/login');
+  }
   try {
     await prisma.category.delete({ where: { id } });
   } catch (error) {
@@ -496,6 +596,21 @@ async function deleteCategory(id: string) {
 
 async function deleteItem(id: string) {
   'use server';
+  // Check authentication
+  const cookieStore = await cookies();
+  const token = cookieStore.get('authToken')?.value;
+  if (!token) {
+    redirect('/login');
+  }
+
+  const user = AuthService.verifyToken(token);
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
+    redirect('/login');
+  }
   try {
     await prisma.item.delete({ where: { id } });
   } catch (error) {
@@ -506,6 +621,21 @@ async function deleteItem(id: string) {
 
 async function deleteCustomer(id: string) {
   'use server';
+  // Check authentication
+  const cookieStore = await cookies();
+  const token = cookieStore.get('authToken')?.value;
+  if (!token) {
+    redirect('/login');
+  }
+
+  const user = AuthService.verifyToken(token);
+  if (
+    !user ||
+    (!AuthService.hasRole(user, 'admin') &&
+      !AuthService.hasRole(user, 'system_admin'))
+  ) {
+    redirect('/login');
+  }
   try {
     await prisma.customer.delete({ where: { id } });
   } catch (error) {

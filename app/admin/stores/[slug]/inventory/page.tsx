@@ -24,6 +24,7 @@ interface StoreInventoryItem {
   targetText?: string;
   unit?: string;
   isActive: boolean;
+  currentQuantity?: number | null;
 }
 
 export default function StoreInventoryPage() {
@@ -41,6 +42,10 @@ export default function StoreInventoryPage() {
   const [editingItem, setEditingItem] = useState<StoreInventoryItem | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [categoryVisibility, setCategoryVisibility] = useState<Record<string, boolean>>({});
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
+  const [copyFromSlug, setCopyFromSlug] = useState<string>('');
+  const [copyReplace, setCopyReplace] = useState<boolean>(false);
 
   // Form state for adding/editing items
   const [selectedItemId, setSelectedItemId] = useState('');
@@ -54,12 +59,43 @@ export default function StoreInventoryPage() {
   fetchStores();
   }, [storeSlug]);
 
+  // Load store preferences (category visibility)
+  useEffect(() => {
+    async function loadPrefs() {
+      try {
+        const res = await fetch(`/api/stores/${storeSlug}/preferences`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const visibilityById: Record<string, boolean> = (data.preferences?.categoryVisibility || {}) as Record<string, boolean>;
+        if (Object.keys(visibilityById).length === 0) return;
+        // Map category IDs to names using current inventory
+        const nameMap: Record<string, string> = {};
+        for (const inv of inventory) {
+          nameMap[inv.item.category.id] = inv.item.category.name;
+        }
+        const nameVisibility: Record<string, boolean> = {};
+        for (const [catId, vis] of Object.entries(visibilityById)) {
+          const name = nameMap[catId];
+          if (name) nameVisibility[name] = !!vis;
+        }
+        if (Object.keys(nameVisibility).length > 0) setCategoryVisibility(nameVisibility);
+      } catch (e) {
+        console.warn('Failed to load preferences', e);
+      }
+    }
+    // Load after inventory is available so we can map IDs to names
+    if (inventory.length > 0) loadPrefs();
+  }, [storeSlug, inventory]);
+
+  const [lastStocktakeDate, setLastStocktakeDate] = useState<string | null>(null);
+
   const fetchInventory = async () => {
     try {
   const response = await fetch(`/api/stores/${storeSlug}/inventory`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setInventory(data.inventory);
+        setLastStocktakeDate(data.lastStocktakeDate || null);
       }
     } catch (error) {
       console.error('Failed to fetch inventory:', error);
@@ -199,6 +235,7 @@ export default function StoreInventoryPage() {
 
   // Get unique categories for filter
   const categories = Array.from(new Set(inventory.map(item => item.item.category.name)));
+  const categoryIdsByName = Object.fromEntries(inventory.map(i => [i.item.category.name, i.item.category.id]));
 
   if (loading) {
     return (
@@ -237,6 +274,12 @@ export default function StoreInventoryPage() {
               <Plus className="h-5 w-5 mr-2" />
               Add Item
             </button>
+            <button
+              onClick={() => setCopyModalOpen(true)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Copy targets from store
+            </button>
           </div>
         </div>
 
@@ -266,6 +309,51 @@ export default function StoreInventoryPage() {
               ))}
             </select>
           </div>
+          {/* Category visibility toggles */}
+          {categories.length > 0 && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-gray-600">Show categories:</span>
+              {categories.map((name) => (
+                <label key={name} className="inline-flex items-center gap-1 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded">
+                  <input
+                    type="checkbox"
+                    checked={categoryVisibility[name] ?? true}
+                    onChange={(e) => setCategoryVisibility((v) => ({ ...v, [name]: e.target.checked }))}
+                  />
+                  {name}
+                </label>
+              ))}
+              <button
+                onClick={() => setCategoryVisibility(categories.reduce((acc, n) => ({ ...acc, [n]: true }), {} as Record<string, boolean>))}
+                className="text-xs text-blue-600 underline"
+              >Show all</button>
+              <button
+                onClick={() => setCategoryVisibility(categories.reduce((acc, n) => ({ ...acc, [n]: false }), {} as Record<string, boolean>))}
+                className="text-xs text-blue-600 underline"
+              >Hide all</button>
+              <button
+                onClick={async () => {
+                  try {
+                    // Convert name-based visibility back to ID-based for persistence
+                    const byId: Record<string, boolean> = {};
+                    for (const name of categories) {
+                      const id = categoryIdsByName[name];
+                      if (id) byId[id] = categoryVisibility[name] ?? true;
+                    }
+                    await fetch(`/api/stores/${storeSlug}/preferences`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ categoryVisibility: byId }),
+                    });
+                  } catch (e) {
+                    console.warn('Failed to save preferences', e);
+                  }
+                }}
+                className="text-xs text-green-700 underline"
+              >Save visibility</button>
+            </div>
+          )}
         </div>
 
         {/* Inventory Table */}
@@ -280,6 +368,9 @@ export default function StoreInventoryPage() {
                   Category
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Current (last stocktake)
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Target Quantity
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -291,7 +382,9 @@ export default function StoreInventoryPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredInventory.map((item) => (
+              {filteredInventory
+                .filter((i) => (categoryVisibility[i.item.category.name] ?? true))
+                .map((item) => (
                 <tr key={item.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">{item.item.name}</div>
@@ -300,6 +393,9 @@ export default function StoreInventoryPage() {
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                       {item.item.category.name}
                     </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {item.currentQuantity ?? '—'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {item.targetText || item.targetQuantity || 'Not set'}
@@ -326,6 +422,64 @@ export default function StoreInventoryPage() {
             </tbody>
           </table>
         </div>
+        {/* Copy modal */}
+        {copyModalOpen && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+              <div className="px-5 py-4 border-b flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-800">Copy targets from another store</h2>
+                <button onClick={() => setCopyModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Source Store</label>
+                  <select
+                    value={copyFromSlug}
+                    onChange={(e) => setCopyFromSlug(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md"
+                  >
+                    <option value="">Select a store…</option>
+                    {stores.filter((s) => s.slug !== storeSlug).map((s) => (
+                      <option key={s.id} value={s.slug}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={copyReplace} onChange={(e) => setCopyReplace(e.target.checked)} />
+                  Replace existing items (deactivate current and copy source fully)
+                </label>
+                <div className="text-xs text-gray-500">If not replacing, matching items will be upserted and others preserved.</div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => setCopyModalOpen(false)} className="px-3 py-2 border rounded">Cancel</button>
+                  <button
+                    onClick={async () => {
+                      if (!copyFromSlug) return;
+                      const res = await fetch(`/api/stores/${storeSlug}/inventory/copy`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ fromStoreSlug: copyFromSlug, replace: copyReplace }),
+                      });
+                      if (res.ok) {
+                        setCopyModalOpen(false);
+                        setCopyFromSlug('');
+                        setCopyReplace(false);
+                        fetchInventory();
+                      }
+                    }}
+                    className="px-3 py-2 rounded bg-blue-600 text-white"
+                    disabled={!copyFromSlug}
+                  >Copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Last stocktake info */}
+        {lastStocktakeDate && (
+          <div className="text-xs text-gray-500 mt-2">Last stocktake: {new Date(lastStocktakeDate).toLocaleDateString()}</div>
+        )}
 
         {filteredInventory.length === 0 && (
           <div className="text-center py-12">

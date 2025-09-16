@@ -82,6 +82,7 @@ export class AuthService {
       where: { id: userId, isActive: true },
       include: {
         roles: {
+          where: { role: { isActive: true } },
           include: {
             role: {
               include: {

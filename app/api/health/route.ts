@@ -7,9 +7,9 @@ export async function GET() {
     // lightweight DB check
     await prisma.$queryRawUnsafe('SELECT 1');
     const ms = Date.now() - start;
-    return NextResponse.json({ ok: true, db: true, ms });
+    return NextResponse.json({ ok: true, db: true, ms, time: new Date().toISOString() });
   } catch (e: any) {
     const ms = Date.now() - start;
-    return NextResponse.json({ ok: false, db: false, ms, error: e?.message }, { status: 500 });
+    return NextResponse.json({ ok: false, db: false, ms, error: e?.message, time: new Date().toISOString() }, { status: 500 });
   }
 }

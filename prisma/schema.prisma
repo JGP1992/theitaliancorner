@@ -24,6 +24,9 @@ model Store {
   stocktakes    Stocktake[]
   deliveryPlans DeliveryPlan[]
   inventory     StoreInventory[]
+
+  // Arbitrary store-level preferences (JSON). Example: { categoryVisibility: { [categoryId]: boolean } }
+  preferences Json?
 }
 
 model StoreInventory {
@@ -151,6 +154,8 @@ model PackagingOption {
 
   deliveryItems DeliveryItem[]
   items         ItemPackagingOption[]
+  // Back relation for scheduled production tasks using this packaging
+  productionTasks ProductionTask[]
 
   @@index([type, isActive])
 }
@@ -285,6 +290,11 @@ model ProductionTask {
   itemId       String
   quantity     Float                 // number of tubs/batches/etc.
   unit         String                @default("units") // e.g., tubs, kg, l
+  /// For variable-weight outputs (e.g., trays), record actual produced weight in kg
+  totalWeightKg Float?
+  /// Optional packaging reference (e.g., 5 L tub, 125 ml cup, 2.5 kg tray)
+  packagingOption   PackagingOption?  @relation(fields: [packagingOptionId], references: [id])
+  packagingOptionId String?
   status       ProductionTaskStatus  @default(SCHEDULED)
   notes        String?
 

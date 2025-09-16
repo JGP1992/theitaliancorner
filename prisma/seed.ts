@@ -247,55 +247,43 @@ async function main() {
   console.log('👥 Creating roles...');
   const roles = [
     {
-      name: 'admin',
-      description: 'Full system administrator',
+      name: 'system_admin',
+      description: 'System administrator with all permissions',
       permissions: permissions.map(p => p.name), // All permissions
     },
     {
-      name: 'manager',
-      description: 'Store manager with most permissions',
+      name: 'admin',
+      description: 'Administrator with full access',
+      permissions: permissions.map(p => p.name), // All permissions
+    },
+    {
+      name: 'staff',
+      description: 'Staff who perform stocktakes in stores and factory',
       permissions: [
-        'stores:read', 'stores:update', 'stores:manage_inventory',
+        'stores:read',
         'stocktakes:read', 'stocktakes:create', 'stocktakes:update',
-        'deliveries:read', 'deliveries:create', 'deliveries:update',
-        'production:read', 'production:create', 'production:update',
-        'orders:read', 'orders:create', 'orders:update',
-  'recipes:read', 'recipes:create', 'recipes:update',
-  'customers:read', 'customers:create', 'customers:update',
-        'users:read',
       ],
+    },
+    // Legacy roles will be created/deactivated for backward compatibility
+    {
+      name: 'manager',
+      description: 'LEGACY: previously used manager role',
+      permissions: [],
     },
     {
       name: 'store_staff',
-      description: 'Store staff for daily operations',
-      permissions: [
-        'stores:read',
-        'stocktakes:read', 'stocktakes:create', 'stocktakes:update',
-        'deliveries:read',
-      ],
+      description: 'LEGACY: store staff (deprecated, mapped to staff)',
+      permissions: [],
     },
     {
       name: 'factory_worker',
-      description: 'Factory worker for production',
-      permissions: [
-        'production:read', 'production:create', 'production:update',
-        'recipes:read',
-        'stocktakes:read',
-      ],
+      description: 'LEGACY: factory worker (deprecated, mapped to staff)',
+      permissions: [],
     },
     {
       name: 'viewer',
-      description: 'Read-only access',
-      permissions: [
-        'stores:read',
-        'stocktakes:read',
-        'deliveries:read',
-        'production:read',
-        'orders:read',
-        'recipes:read',
-  'customers:read',
-        'users:read',
-      ],
+      description: 'LEGACY: read-only viewer',
+      permissions: [],
     },
   ];
 
@@ -309,7 +297,7 @@ async function main() {
       },
     });
 
-    // Assign permissions to role
+    // Assign permissions to role (only for non-legacy roles with permissions)
     for (const permName of roleData.permissions) {
       const permission = await prisma.permission.findUnique({
         where: { name: permName },
@@ -331,6 +319,27 @@ async function main() {
       }
     }
   }
+  // Deactivate legacy roles and map legacy users to staff
+  console.log('♻️ Aligning roles to system_admin/admin/staff taxonomy...');
+  const legacyRoleNames = ['manager', 'store_staff', 'factory_worker', 'viewer'];
+  await prisma.role.updateMany({ where: { name: { in: legacyRoleNames } }, data: { isActive: false } });
+
+  // Map users with legacy roles to staff (add staff role without removing others here)
+  const staffRoleRec = await prisma.role.findUnique({ where: { name: 'staff' } });
+  if (staffRoleRec) {
+    const legacyUserRoles = await prisma.userRole.findMany({
+      where: { role: { name: { in: legacyRoleNames } } },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    for (const lur of legacyUserRoles) {
+      const alreadyStaff = await prisma.userRole.findFirst({ where: { userId: lur.userId, roleId: staffRoleRec.id } });
+      if (!alreadyStaff) {
+        await prisma.userRole.create({ data: { userId: lur.userId, roleId: staffRoleRec.id } });
+      }
+    }
+  }
+
   // Optionally create a first admin user from env in minimal or full mode
   const adminRole = await prisma.role.findUnique({ where: { name: 'admin' } });
   const envFirstAdminEmail = (process.env.FIRST_ADMIN_EMAIL || '').trim();
@@ -359,7 +368,8 @@ async function main() {
     // Customer-facing options (restaurants/cafes/hotels)
     { name: '125 ml cup', type: 'CUP', sizeValue: 125, sizeUnit: 'ML', variableWeight: false, sortOrder: 1, allowStores: false, allowCustomers: true },
     { name: '2 L tub', type: 'TUB', sizeValue: 2, sizeUnit: 'L', variableWeight: false, sortOrder: 2, allowStores: false, allowCustomers: true },
-    { name: '5 L tub', type: 'TUB', sizeValue: 5, sizeUnit: 'L', variableWeight: false, sortOrder: 3, allowStores: true, allowCustomers: true },  { name: '2.5 kg tray', type: 'TRAY', sizeValue: 2.5, sizeUnit: 'KG', variableWeight: true, sortOrder: 4, allowStores: true, allowCustomers: true },
+  { name: '5 L tub', type: 'TUB', sizeValue: 5, sizeUnit: 'L', variableWeight: false, sortOrder: 3, allowStores: true, allowCustomers: true },
+  { name: '2.5 kg tray', type: 'TRAY', sizeValue: 2.5, sizeUnit: 'KG', variableWeight: true, sortOrder: 4, allowStores: true, allowCustomers: true },
     // Shop-facing (store) trays; variable weights allowed
     { name: '5 L tray', type: 'TRAY', sizeValue: 5, sizeUnit: 'L', variableWeight: true, sortOrder: 5, allowStores: true, allowCustomers: false },
   ];
@@ -380,23 +390,38 @@ async function main() {
     return;
   }
 
-  // Create default manager user
-  console.log('👤 Creating default manager user...');
-  const managerRole = await prisma.role.findUnique({ where: { name: 'manager' } });
-  if (managerRole) {
-    const existingManager = await prisma.user.findUnique({
-      where: { email: 'manager@stocktake.com' },
-    });
-
-    if (!existingManager) {
+  // Remove legacy default manager user creation
+  // Create default system admin user
+  console.log('👤 Creating default system admin user...');
+  const sysAdminRole = await prisma.role.findUnique({ where: { name: 'system_admin' } });
+  if (sysAdminRole) {
+    const existingSysAdmin = await prisma.user.findUnique({ where: { email: 'sysadmin@stocktake.com' } });
+    if (!existingSysAdmin) {
       await AuthService.createUser(
-        'manager@stocktake.com',
-        'manager123',
-        'Store',
-        'Manager',
-        [managerRole.id]
+        'sysadmin@stocktake.com',
+        'sysadmin123',
+        'System',
+        'Admin',
+        [sysAdminRole.id]
       );
-      console.log('✅ Created default manager user: manager@stocktake.com / manager123');
+      console.log('✅ Created default system admin user: sysadmin@stocktake.com / sysadmin123');
+    }
+  }
+
+  // Create default staff user
+  console.log('👤 Creating default staff user...');
+  const staffRole = await prisma.role.findUnique({ where: { name: 'staff' } });
+  if (staffRole) {
+    const existingStaff = await prisma.user.findUnique({ where: { email: 'staff@stocktake.com' } });
+    if (!existingStaff) {
+      await AuthService.createUser(
+        'staff@stocktake.com',
+        'staff123',
+        'Store',
+        'Staff',
+        [staffRole.id]
+      );
+      console.log('✅ Created default staff user: staff@stocktake.com / staff123');
     }
   }
   const stores = [
