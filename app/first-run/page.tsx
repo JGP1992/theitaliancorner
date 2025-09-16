@@ -5,6 +5,11 @@ import FirstRunForm from '@/components/FirstRunForm';
 import React from 'react';
 import '../globals.css';
 
+// Ensure this page is always rendered dynamically at runtime (not during static build)
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+
 export default async function FirstRunPage() {
   const userCount = await prisma.user.count();
   if (userCount > 0) {

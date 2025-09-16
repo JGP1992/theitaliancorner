@@ -28,7 +28,7 @@ This app uses Next.js 15, Prisma, and PostgreSQL. Auth is JWT via HttpOnly cooki
 ### Vercel deployment
 1) Create a Postgres DB (e.g., Neon, Supabase, Railway) and get a DATABASE_URL (ssl required).
 2) In Vercel Project Settings > Environment Variables, add:
-	- DATABASE_URL = postgresql://... (with sslmode=require if needed)
+	- DATABASE_URL = postgresql://... (with sslmode=require if needed). Only set DATABASE_URL; do not use POSTGRES_URL or PRISMA_DATABASE_URL.
 	- JWT_SECRET = strong random secret
 	- NODE_ENV = production
 3) Deploy. On first deploy, run a one-time migration via Vercel CLI or run a job locally:

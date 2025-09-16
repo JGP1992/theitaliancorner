@@ -3,7 +3,7 @@
 import '../globals.css';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import Logo from '../../components/Logo';
 import { useAuth } from '../../components/AuthContext';
@@ -17,6 +17,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login, isAuthenticated, checkAuth, isLoading: authLoading } = useAuth();
 
   // Prefetch home to make post-login navigation instant
@@ -44,9 +45,25 @@ export default function LoginPage() {
     }
   }, []);
 
+  // Surface server errors passed via /login?error=...
+  useEffect(() => {
+    const err = searchParams.get('error');
+    if (err) {
+      try {
+        // Decode URI components just in case
+        setError(decodeURIComponent(err));
+      } catch {
+        setError(err);
+      }
+    } else {
+      setError('');
+    }
+  }, [searchParams]);
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     // Let the browser submit the form and follow the server redirect.
     // Persist remember-me email locally before the navigation.
+    setIsLoading(true);
     if (rememberMe) {
       localStorage.setItem('rememberedEmail', email);
       localStorage.setItem('rememberMe', 'true');
