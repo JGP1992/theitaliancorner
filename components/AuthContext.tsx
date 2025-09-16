@@ -78,6 +78,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     localStorage.removeItem('user');
     window.dispatchEvent(new CustomEvent('userLogout'));
+    // Force a hard navigation to avoid stale client chunks after a deploy
+    if (typeof window !== 'undefined' && 'location' in window) {
+      window.location.assign('/login');
+      return;
+    }
     router.push('/login');
   };
 
