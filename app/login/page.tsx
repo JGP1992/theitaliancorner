@@ -1,9 +1,7 @@
 import '../globals.css';
 
-// Route options must be defined in a Server Component file
+// Avoid prerender; render this page dynamically at request time
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-export const runtime = 'nodejs';
 
 import LoginClient from './LoginClient';
 
