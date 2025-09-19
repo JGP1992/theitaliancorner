@@ -9,13 +9,17 @@ export async function DELETE(
   try {
     const token = req.cookies.get('authToken')?.value;
     if (!token) {
+      console.log('No auth token found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const user = AuthService.verifyToken(token);
     if (!user) {
+      console.log('Invalid auth token');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    console.log('User authenticated:', user.email, 'with roles:', user.roles, 'and permissions:', user.permissions);
 
     // Check if user has permission to delete stores
     // Temporarily disabled for debugging
@@ -24,7 +28,6 @@ export async function DELETE(
     // }
 
     const { slug } = await params;
-
     console.log('Attempting to delete store with slug:', slug);
 
     // Check if store exists

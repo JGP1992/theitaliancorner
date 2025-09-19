@@ -15,8 +15,15 @@ export default function DeleteButton({ id, type, name, onDelete }: DeleteButtonP
 
   const handleDelete = async () => {
     const confirmMessage = getConfirmMessage(type, name);
-    if (!confirm(confirmMessage)) {
-      return;
+    if (typeof window !== 'undefined' && window.confirm) {
+      if (!window.confirm(confirmMessage)) {
+        return;
+      }
+    } else {
+      // Fallback for environments without window.confirm
+      if (!confirm(confirmMessage)) {
+        return;
+      }
     }
 
     setIsDeleting(true);
