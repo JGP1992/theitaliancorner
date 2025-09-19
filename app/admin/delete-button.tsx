@@ -24,8 +24,7 @@ export default function DeleteButton({ id, type, name, onDelete }: DeleteButtonP
 
     try {
       await onDelete(id);
-      // Success - redirect to admin page
-      window.location.href = '/admin';
+      // Success - the parent component will handle any necessary updates
     } catch (err) {
       console.error(`Failed to delete ${type}:`, err);
       setError(`Failed to delete ${type}. It may be in use.`);
