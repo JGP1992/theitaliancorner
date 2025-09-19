@@ -5,6 +5,7 @@ import '../../globals.css';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Settings, Package } from 'lucide-react';
+import DeleteButton from '../delete-button';
 
 interface Store {
   id: string;
@@ -32,6 +33,25 @@ export default function StoresManagementPage() {
       console.error('Failed to fetch stores:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteStore = async (storeSlug: string) => {
+    try {
+      const response = await fetch(`/api/stores/${storeSlug}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Refresh the stores list
+        fetchStores();
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete store');
+      }
+    } catch (error) {
+      console.error('Error deleting store:', error);
+      throw error;
     }
   };
 
@@ -66,7 +86,7 @@ export default function StoresManagementPage() {
                     <p className="text-sm text-gray-500">Slug: {store.slug}</p>
                   </div>
                 </div>
-                <div className="mt-4">
+                <div className="mt-4 flex space-x-2">
                   <Link
                     href={`/admin/stores/${store.slug}/inventory`}
                     className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -74,6 +94,12 @@ export default function StoresManagementPage() {
                     <Settings className="h-4 w-4 mr-2" />
                     Manage Inventory
                   </Link>
+                  <DeleteButton
+                    id={store.slug}
+                    type="store"
+                    name={store.name}
+                    onDelete={handleDeleteStore}
+                  />
                 </div>
               </div>
             </div>
