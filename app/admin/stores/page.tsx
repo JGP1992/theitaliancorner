@@ -36,20 +36,6 @@ export default function StoresManagementPage() {
     }
   };
 
-  const testAPIConnection = async (storeSlug: string) => {
-    console.log('🧪 Testing API connection for store:', storeSlug);
-    try {
-      const response = await fetch(`/api/stores/${storeSlug}`);
-      console.log('📡 GET Response status:', response.status);
-      const data = await response.json();
-      console.log('📄 GET Response data:', data);
-      alert(`API Test Result:\nStatus: ${response.status}\nData: ${JSON.stringify(data, null, 2)}`);
-    } catch (error) {
-      console.error('❌ API Test Error:', error);
-      alert(`API Test Failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  };
-
   const handleDeleteStore = async (storeSlug: string) => {
     console.log('🖱️ Delete button clicked for store:', storeSlug);
     alert(`Delete button clicked for store: ${storeSlug}`);
@@ -118,12 +104,6 @@ export default function StoresManagementPage() {
                     <Settings className="h-4 w-4 mr-2" />
                     Manage Inventory
                   </Link>
-                  <button
-                    onClick={() => testAPIConnection(store.slug)}
-                    className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    🧪 Test API
-                  </button>
                   <DeleteButton
                     id={store.slug}
                     type="store"
