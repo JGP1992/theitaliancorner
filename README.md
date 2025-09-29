@@ -17,7 +17,10 @@ This app uses Next.js 15, Prisma, and PostgreSQL. Auth is JWT via HttpOnly cooki
 - Install deps: npm install
 - Push schema: npm run db:push
 - Seed data (local demo): npm run db:seed
-- Clean install (no sample data): npm run db:seed:minimal (optionally set FIRST_ADMIN_* to create your first admin)
+- Clean install (no sample data):
+	- Option A (local): npm run provision:clean
+	- Option B (manual): npm run db:seed:minimal
+	- Tip: set FIRST_ADMIN_* in env to auto-create the first admin during minimal seeding.
 
 ### 5) Run dev
 - Start: npm run dev
@@ -32,9 +35,10 @@ This app uses Next.js 15, Prisma, and PostgreSQL. Auth is JWT via HttpOnly cooki
 	- JWT_SECRET = strong random secret
 	- NODE_ENV = production
 3) Deploy. On first deploy, run a one-time migration via Vercel CLI or run a job locally:
-	- Locally: set DATABASE_URL to prod DB, then run `npm run db:migrate:deploy`. If you want a clean install, run `npm run db:seed:minimal` (with FIRST_ADMIN_*). Avoid full demo seeding in production.
+	- Locally: set DATABASE_URL to prod DB, then run `npm run provision:prod` for a clean install (no demo data). Ensure FIRST_ADMIN_* are set if you want an admin created automatically.
 4) Visit your site. Health at /api/health.
 
 Notes
 - Middleware protects non-API routes; /login is public and redirects if already authenticated.
 - All client fetches to protected APIs include credentials and no-store cache.
+ - Clean install: visit /first-run to create the first admin if you didn't set FIRST_ADMIN_*.

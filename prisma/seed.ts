@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AuthService } from '../lib/auth';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
@@ -171,8 +172,11 @@ async function main() {
   const dbUrl = process.env.DATABASE_URL || '';
   const seedMode = (process.env.SEED_MODE || '').toLowerCase();
   const isMinimal = seedMode === 'minimal' || (process.env.CLEAN_SEED || '').toLowerCase() === 'true';
-  const LIGHT_SEED = !isMinimal && ((process.env.LIGHT_SEED || '').toLowerCase() === 'true' || dbUrl.includes('db.prisma.io'));
-  if (isMinimal) {
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const allowDemoSeed = (process.env.ALLOW_DEMO_SEED || '').toLowerCase() === 'true';
+  const effectiveMinimal = isMinimal || (isProd && !allowDemoSeed);
+  const LIGHT_SEED = !effectiveMinimal && ((process.env.LIGHT_SEED || '').toLowerCase() === 'true' || dbUrl.includes('db.prisma.io'));
+  if (effectiveMinimal) {
     console.log('⚙️ Using MINIMAL seed mode (no sample data)');
   } else if (LIGHT_SEED) {
     console.log('⚙️ Using LIGHT_SEED mode (reduced volumes)');
@@ -382,10 +386,53 @@ async function main() {
     });
   }
 
-  // In minimal mode, stop here — no demo entities, stores, customers, items, or sample records
-  if (isMinimal) {
-    console.log('🧹 Minimal seed complete: roles/permissions, packaging options, and optional FIRST_ADMIN only.');
-    console.log('❌ Skipping creation of demo stores, customers, items, stocktakes, deliveries, suppliers, and recipes.');
+  // In minimal mode, ensure at least one admin user exists, then stop (no demo entities)
+  if (effectiveMinimal) {
+    const userTotal = await prisma.user.count();
+    if (userTotal === 0) {
+      // No FIRST_ADMIN_* provided or creation failed; create a fallback system admin with a random password
+      const sysAdminRole = await prisma.role.findUnique({ where: { name: 'system_admin' } });
+      if (sysAdminRole) {
+        const randomPassword = crypto.randomBytes(12).toString('base64url');
+        const email = 'sysadmin@stocktake.local';
+        await AuthService.createUser(
+          email,
+          randomPassword,
+          'System',
+          'Admin',
+          [sysAdminRole.id]
+        );
+        console.log('🔐 No admin supplied via FIRST_ADMIN_* env. Created fallback system admin:');
+        console.log(`    Email: ${email}`);
+        console.log(`    Temp Password: ${randomPassword}`);
+        console.log('    IMPORTANT: Log in immediately and change this password.');
+      } else {
+        console.warn('⚠️ system_admin role not found; cannot create fallback admin.');
+      }
+    }
+    // Optional: create a single default store (no demo data) if requested via env
+    if ((process.env.CREATE_DEFAULT_STORE || '').toLowerCase() === 'true') {
+      const defaultStoreName = process.env.DEFAULT_STORE_NAME?.trim() || 'Main Store';
+      const defaultStoreSlug = (process.env.DEFAULT_STORE_SLUG?.trim() || defaultStoreName.toLowerCase().replace(/[^a-z0-9]+/g, '-')).replace(/^-+|-+$/g, '');
+      const existingStore = await prisma.store.findUnique({ where: { slug: defaultStoreSlug } });
+      if (!existingStore) {
+        await prisma.store.create({
+          data: {
+            name: defaultStoreName,
+            slug: defaultStoreSlug,
+            apiKey: `store_${defaultStoreSlug}_key_${Math.random().toString(36).slice(2,10)}`,
+          }
+        });
+        console.log(`🏢 Created default store: ${defaultStoreName} (slug: ${defaultStoreSlug})`);
+      } else {
+        console.log(`ℹ️ Default store already exists (slug: ${defaultStoreSlug})`);
+      }
+    } else {
+      console.log('🏢 No default store created (set CREATE_DEFAULT_STORE=true to create one).');
+    }
+
+    console.log('🧹 Minimal seed complete: roles/permissions, packaging options, and at least one admin user (and optional single store).');
+    console.log('❌ Skipping creation of demo customers, items, stocktakes, deliveries, suppliers, and recipes.');
     console.log('✅ Minimal seeding completed successfully!');
     return;
   }

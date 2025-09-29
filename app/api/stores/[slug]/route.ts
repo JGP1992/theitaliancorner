@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
-import { AuthService } from '@/lib/auth';
 
 export async function GET(
   req: NextRequest,
@@ -8,19 +7,21 @@ export async function GET(
 ) {
   try {
     const { slug } = await params;
-    console.log('GET request for store:', slug);
+    console.log('🔍 GET request for store:', slug);
 
     const store = await prisma.store.findUnique({
       where: { slug },
     });
 
     if (!store) {
+      console.log('❌ Store not found:', slug);
       return NextResponse.json({ error: 'Store not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ store });
+    console.log('✅ Found store:', store.name);
+    return NextResponse.json({ store, message: 'API is working!' });
   } catch (error) {
-    console.error('Error fetching store:', error);
+    console.error('❌ Error fetching store:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       { error: `Failed to fetch store: ${errorMessage}` },
@@ -34,25 +35,10 @@ export async function DELETE(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
-    console.log('DELETE request received for store deletion');
-
-    // Temporarily bypass authentication for testing
-    // const token = req.cookies.get('authToken')?.value;
-    // if (!token) {
-    //   console.log('No auth token found');
-    //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    // }
-
-    // const user = AuthService.verifyToken(token);
-    // if (!user) {
-    //   console.log('Invalid auth token');
-    //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    // }
-
-    // console.log('User authenticated:', user.email, 'with roles:', user.roles, 'and permissions:', user.permissions);
+    console.log('🗑️ DELETE request received for store deletion');
 
     const { slug } = await params;
-    console.log('Attempting to delete store with slug:', slug);
+    console.log('🎯 Attempting to delete store with slug:', slug);
 
     // Check if store exists
     const store = await prisma.store.findUnique({
@@ -72,9 +58,27 @@ export async function DELETE(
     console.log('Found store:', store.name, 'with', store.stocktakes.length, 'stocktakes,', store.deliveryPlans.length, 'delivery plans,', store.inventory.length, 'inventory items');
 
     // Delete associated records first (cascade delete)
-    // Note: Prisma schema should handle cascading deletes, but we'll do it explicitly for clarity
-
     console.log('Starting deletion of associated records...');
+
+    try {
+      // Delete stocktake items first (before stocktakes)
+      console.log('Deleting stocktake items...');
+      const stocktakeItemCount = await prisma.stocktakeItem.deleteMany({
+        where: {
+          stocktake: {
+            storeId: store.id
+          }
+        },
+      });
+      console.log(`Deleted ${stocktakeItemCount.count} stocktake items`);
+    } catch (error) {
+      console.error('Error deleting stocktake items:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return NextResponse.json(
+        { error: `Failed to delete stocktake items: ${errorMessage}` },
+        { status: 500 }
+      );
+    }
 
     try {
       // Delete stocktakes
@@ -107,6 +111,12 @@ export async function DELETE(
           await prisma.deliveryItem.deleteMany({
             where: { planId: plan.id },
           });
+
+          console.log('Deleting delivery plan customers for plan:', plan.id);
+          await prisma.deliveryPlanCustomer.deleteMany({
+            where: { planId: plan.id },
+          });
+
           console.log('Deleting delivery plan:', plan.id);
           await prisma.deliveryPlan.delete({
             where: { id: plan.id },
@@ -156,6 +166,15 @@ export async function DELETE(
     } catch (error) {
       console.error('Error deleting store:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      // Check if it's a foreign key constraint error
+      if (errorMessage.includes('Foreign key constraint') || errorMessage.includes('constraint')) {
+        return NextResponse.json(
+          { error: 'Failed to delete store. It may be referenced by other records that need to be deleted first.' },
+          { status: 409 }
+        );
+      }
+
       return NextResponse.json(
         { error: `Failed to delete store: ${errorMessage}` },
         { status: 500 }
