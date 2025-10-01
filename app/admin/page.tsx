@@ -637,9 +637,22 @@ async function deleteCustomer(id: string) {
     redirect('/login');
   }
   try {
-    await prisma.customer.delete({ where: { id } });
+    // Perform a soft delete to avoid foreign key constraint issues with delivery plans
+    // and keep historical plan data intact. Also remove any DeliveryPlanCustomer links.
+    await prisma.$transaction(async (tx) => {
+      // Remove links (these are not needed once customer is inactive)
+      await tx.deliveryPlanCustomer.deleteMany({ where: { customerId: id } });
+
+      // Mark inactive instead of hard delete to preserve historical references elsewhere
+      const existing = await tx.customer.findUnique({ where: { id } });
+      if (existing) {
+        if (existing.isActive) {
+          await tx.customer.update({ where: { id }, data: { isActive: false } });
+        }
+      }
+    });
   } catch (error) {
-    console.error('Failed to delete customer:', error);
-    throw new Error('Cannot delete customer. They may be referenced in delivery plans.');
+    console.error('Failed to soft-delete customer:', error);
+    throw new Error('Cannot remove customer. They may be referenced in historical records.');
   }
 }
