@@ -1,7 +1,7 @@
 'use client';
 
 import '../../../../globals.css';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Plus, Edit, Trash2, Save, X, Search } from 'lucide-react';
 
@@ -46,6 +46,8 @@ export default function StoreInventoryPage() {
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [copyFromSlug, setCopyFromSlug] = useState<string>('');
   const [copyReplace, setCopyReplace] = useState<boolean>(false);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [showScrollHint, setShowScrollHint] = useState(false);
 
   // Form state for adding/editing items
   const [selectedItemId, setSelectedItemId] = useState('');
@@ -88,6 +90,25 @@ export default function StoreInventoryPage() {
   }, [storeSlug, inventory]);
 
   const [lastStocktakeDate, setLastStocktakeDate] = useState<string | null>(null);
+
+  // Detect if horizontal scrolling is needed and whether to show hint
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const check = () => {
+      if (!el) return;
+      const needs = el.scrollWidth > el.clientWidth + 8; // small buffer
+      const atEnd = Math.abs(el.scrollLeft + el.clientWidth - el.scrollWidth) < 8;
+      setShowScrollHint(needs && !atEnd);
+    };
+    check();
+    el.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => {
+      el.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+    };
+  }, [inventory.length]);
 
   const fetchInventory = async () => {
     try {
@@ -356,10 +377,11 @@ export default function StoreInventoryPage() {
           )}
         </div>
 
-        {/* Inventory Table */}
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+        {/* Inventory Table (with horizontal scroll) */}
+        <div className="relative -mx-4 sm:mx-0">
+          <div ref={scrollContainerRef} className="overflow-x-auto bg-white shadow sm:rounded-md scrollbar-thin">
+            <table className="min-w-[1100px] w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Item
@@ -380,8 +402,8 @@ export default function StoreInventoryPage() {
                   Actions
                 </th>
               </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
               {filteredInventory
                 .filter((i) => (categoryVisibility[i.item.category.name] ?? true))
                 .map((item) => (
@@ -419,8 +441,14 @@ export default function StoreInventoryPage() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+            {showScrollHint && (
+              <div className="pointer-events-none absolute right-2 top-2 text-[10px] bg-gray-800/60 text-white px-2 py-1 rounded shadow">
+                Scroll →
+              </div>
+            )}
+          </div>
         </div>
         {/* Copy modal */}
         {copyModalOpen && (
