@@ -379,65 +379,73 @@ export default function StoreInventoryPage() {
 
         {/* Inventory Table (with horizontal scroll) */}
         <div className="relative -mx-4 sm:mx-0">
-          <div ref={scrollContainerRef} className="overflow-x-auto bg-white shadow sm:rounded-md scrollbar-thin">
-            <table className="min-w-[1100px] w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50 sticky top-0 z-10">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Item
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Category
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Current (last stocktake)
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Target Quantity
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Unit
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
+          <div ref={scrollContainerRef} className="overflow-x-auto bg-white shadow sm:rounded-md scrollbar-thin relative" aria-label="Store inventory table scroll container">
+            <table className="min-w-[1000px] w-full divide-y divide-gray-200 table-auto">
+              <thead className="bg-gray-50 sticky top-0 z-20">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 z-30 bg-gray-50">
+                    Item
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
+                    Category
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
+                    Current (last stocktake)
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-44">
+                    Target Quantity
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
+                    Unit
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                    Actions
+                  </th>
+                </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
               {filteredInventory
                 .filter((i) => (categoryVisibility[i.item.category.name] ?? true))
                 .map((item) => (
-                <tr key={item.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{item.item.name}</div>
+                <tr key={item.id} className="align-top">
+                  <td className="px-6 py-4 sticky left-0 bg-white z-10">
+                    <div className="text-sm font-medium text-gray-900 max-w-[220px] whitespace-normal break-words leading-snug">
+                      {item.item.name}
+                    </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <td className="px-4 py-4">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 whitespace-nowrap">
                       {item.item.category.name}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-4 py-4 text-sm text-gray-900 whitespace-nowrap">
                     {item.currentQuantity ?? '—'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {item.targetText || item.targetQuantity || 'Not set'}
+                  <td className="px-4 py-4 text-sm text-gray-900">
+                    <span className="block max-w-[160px] whitespace-normal break-words">
+                      {item.targetText || item.targetQuantity || 'Not set'}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-4 py-4 text-sm text-gray-500 whitespace-nowrap">
                     {item.unit || '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => startEditing(item)}
-                      className="text-indigo-600 hover:text-indigo-900 mr-4"
-                    >
-                      <Edit className="h-5 w-5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteItem(item.item.id)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <Trash2 className="h-5 w-5" />
-                    </button>
+                  <td className="px-4 py-4 text-right text-sm font-medium whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => startEditing(item)}
+                        className="text-indigo-600 hover:text-indigo-900"
+                        aria-label={`Edit ${item.item.name}`}
+                      >
+                        <Edit className="h-5 w-5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteItem(item.item.id)}
+                        className="text-red-600 hover:text-red-900"
+                        aria-label={`Remove ${item.item.name}`}
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
